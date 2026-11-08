@@ -7,9 +7,9 @@
   "low_volume_market_usd": 5000,
   "api_minimum_trade_usd": 100,
   "wallet_cluster_usd": 2500,
-  "multi_wallet_cluster_usd": 6000,
+  "multi_wallet_cluster_usd": 3000,
   "multi_wallet_min_wallets": 3,
-  "cluster_window_seconds": 300,
+  "cluster_window_seconds": 600,
   "alert_cooldown_seconds": 1800,
   "lookback_seconds": 540,
   "max_pages_per_batch": 30,
@@ -24,5 +24,12 @@
   "single_buy_unknown_usd": 1000,
   "position_lower_usd": 900,
   "position_unknown_usd": 1700,
-  "position_window_seconds": 21600
+  "position_window_seconds": 21600,
+  "position_24h_lower_usd": 1500,
+  "position_24h_unknown_usd": 3500,
+  "position_24h_window_seconds": 86400,
+  "diagnostic_trade_logs": true,
+  "daily_summary_enabled": true,
+  "daily_summary_hour_local": 21,
+  "daily_summary_top_n": 10
 }

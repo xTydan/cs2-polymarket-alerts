@@ -1,56 +1,35 @@
-# CS2 Polymarket Radar — GitHub Actions + Telegram
+# CS2 Polymarket Radar v1.5 — aktualizacja do GitHub Actions
 
-Wersja uruchamiana co ~5 minut w GitHub Actions, bez włączonego PC. Korzysta z publicznego Polymarket Gamma API i Data API oraz istniejącego bota Telegram. **Kod nie służy do automatycznego zawierania zakładów.**
+Ta paczka aktualizuje **istniejący** radar v1.4. Nie zakładaj nowego repozytorium ani nowego bota Telegram. Działający harmonogram w cron-job.org i dotychczasowy `radar.yml` pozostają bez zmian.
 
-## Dlaczego repozytorium PUBLIC?
+## Instalacja
 
-GitHub Actions w publicznym repozytorium wykorzystującym standardowe hostowane maszyny jest bezpłatny w ramach aktualnych zasad. W prywatnym repozytorium GitHub Free przewiduje 2000 minut/miesiąc, co przy odpalaniu co 5 minut może nie wystarczyć. Kod jest publiczny, ale token Telegram musi być przechowywany wyłącznie w `Settings > Secrets and variables > Actions` (nigdy w plikach repozytorium!). Artefakty z bazą historii publicznych transakcji mogą być widoczne dla osób z dostępem do repozytorium.
+1. Zrób kopię zapasową aktualnych `radar.py` i `config.json` z repozytorium.
+2. Wejdź do `https://github.com/xTydan/cs2-polymarket-alerts` → **Code**.
+3. Podmień w **głównym folderze repozytorium** oba pliki `radar.py` i `config.json` zawartością tej paczki. Zatwierdź **Commit changes** do `main`.
+4. **Nie przesyłaj** pliku `.env`, tokenu Telegrama, bazy SQLite ani historii z Twojego komputera.
+5. Pozostaw `github_state.py`, `.github/workflows/radar.yml`, GitHub Secrets i konfigurację cron-job.org **bez zmian**.
+6. Przejdź do **Actions → CS2 Polymarket Radar → Run workflow** i uruchom z `test_telegram = false`. Otwórz zadanie `scan` i sekcję **Skanuj Polymarket lub przetestuj Telegram**.
+7. W logach zobaczysz `TX | lower/unknown | ... | $... | portfel ... | ALERT ...` lub `BRAK ALERTU ...`. Dopiero jeśli nowy alert zostanie zakwalifikowany i wysłany, przyjdzie wiadomość na Telegram.
+8. Aby nie skanować dwa razy, przy sprawnym cron-job.org można usunąć tylko blok `schedule` z workflow, ale **nie usuwaj** `workflow_dispatch` (potrzebny do wyzwalania przez API).
 
-## Instalacja bez terminala
+## Nowe działanie
 
-1. Zaloguj się na [github.com](https://github.com), kliknij `+` > **New repository**.
-2. Nazwa: np. `cs2-polymarket-alerts`; zaznacz **Public** i utwórz repozytorium.
-3. Kliknij **Add file > Upload files** i wgraj `radar.py`, `github_state.py`, `requirements.txt`, `config.json`, `README_PL.md`, `.gitignore` oraz katalog `tests` (opcjonalny). **Nie wgrywaj żadnego `.env`** z Windowsa.
-4. Wejdź w **Add file > Create new file**, w polu nazwy wpisz dokładnie `.github/workflows/radar.yml`, wklej treść z pobranej paczki z tego pliku, następnie **Commit changes**. Przy wgrywaniu przez GitHub Desktop można skopiować cały katalog paczki wraz z `.github` i zrobić jeden commit.
-5. Wejdź w **Settings > Secrets and variables > Actions > New repository secret**. Dodaj osobno:
-   - `TELEGRAM_BOT_TOKEN` = token już istniejącego bota od BotFather.
-   - `TELEGRAM_CHAT_ID` = identyfikator rozmowy Telegram z wcześniejszego pliku `.env`.
-   Nie wpisuj cudzysłowów. Nie przesyłaj nikomu tokenu i nie publikuj `.env`.
-6. Wejdź w **Actions > CS2 Polymarket Radar > Run workflow**, zaznacz `test_telegram` na **true**. Po zakończeniu uruchomienia powinieneś dostać wiadomość testową na telefonie.
-7. W **Actions > Run workflow** uruchom ponownie z `test_telegram` na **false**. Pierwszy skan tworzy stan bazowy i nie wysyła starych alertów; kolejne zadania uruchamiają się automatycznie około co 5 minut.
-8. Wyłącz lokalną wersję bota na Windowsie (Ctrl+C), żeby nie było podwójnych alertów.
+- Raportowane w logach są **nowe, zaobserwowane** zakupy od 100 USD na znalezionych rynkach CS2, z kwotą, wynikiem, meczem, skrótem portfela i przyczyną alertu lub odrzucenia. Wcześniej zapisane transakcje nie będą powtarzane.
+- Niższy tier (rozpoznany po słowach w nazwie rozgrywek): pojedynczy zakup **≥500 USD**, suma zakupów jednego portfela na jeden wynik **≥900 USD w 6 h**, albo **≥1500 USD w 24 h**.
+- Nieustalony tier: odpowiednio **≥1000 USD**, **≥1700 USD / 6 h**, **≥3500 USD / 24 h**.
+- Kilka portfeli na jeden wynik: co najmniej **3 portfele**, łączna kwota **≥3000 USD w 10 minut**.
+- Przy pierwszym skanie po godzinie **21:00 czasu polskiego** bot wysyła codzienny ranking maksymalnie 10 największych zaobserwowanych sum zakupów *jednego portfela na jeden wynik* na rozpoznanych niższych ligach w danym dniu. Jeśli nie ma takich zakupów, raport informuje o braku danych. Powstaje najwyżej jeden raport na dzień (jeśli zapis bazy zostanie przywrócony).
+- Poprawiono przetwarzanie stron transakcji w kolejności chronologicznej.
+- Stan/wykryte transakcje i kolejka wiadomości pozostają w tej samej bazie SQLite; istniejący `github_state.py` nadal ją przenosi między skanami.
 
-### Powiadomienia na telefonie
+## Istotne ograniczenia
 
-Zainstaluj Telegram na telefonie, zaloguj się na swoje konto, otwórz rozmowę z botem, naciśnij `Start`, a następnie włącz powiadomienia dla tej rozmowy. Nie trzeba mieć uruchomionego PC ani otwartej przeglądarki.
+- Nie oznaczamy turnieju jako oficjalnie „Tier 3”; klasyfikacja to heurystyka. Część turniejów i portfeli może zostać pominięta.
+- Sumujemy zaobserwowane **zakupy brutto**, a nie aktualny kapitał w pozycji. Nie odejmujemy sprzedaży i nie obejmujemy transakcji niewidocznych dla API lub przed zainstalowaniem monitora.
+- Dane na API Polymarket i harmonogram GitHub/cron-job.org mogą mieć opóźnienia. Sygnał nie dowodzi ustawienia meczu ani posiadania informacji poufnych.
+- Codzienne raporty na publicznym GitHubie nie stanowią archiwum niezależnego od bazy; jeśli stan zniknie, nie odtworzą się wcześniejsze zakupy.
 
-## Jak działa monitor
+## Testy
 
-- Odkrywa aktywne mecze CS2 przez Gamma API i pobiera transakcje przez Data API v2.
-- Wykrywa pojedyncze duże zakupy, zakupy dużego udziału względem wolumenu, serie jednego portfela i klastry różnych portfeli obstawiających jeden wynik.
-- Odfiltrowuje rozpoznane duże turnieje. Poziom Tier 2/3 jest oceniany heurystycznie, a nie potwierdzany oficjalną klasyfikacją.
-- Przy pierwszym uruchomieniu nie wysyła powiadomień o dawnych transakcjach.
-- Po każdym skanie zapisuje bazę i cache jako skompresowany artefakt GitHub Actions z czasem przechowania 1 dzień. Dzięki temu po następnych uruchomieniach nie duplikuje zwykłych alertów. Jeżeli przez ponad 24 h nie będzie udanego przebiegu, stan może wygasnąć.
-- Jeżeli zadanie się opóźni, odzyskuje do jednej godziny zaległych zakupów, jeżeli są jeszcze dostępne w stronicowaniu API. Nie gwarantuje to pełnego pokrycia w okresie awarii.
-
-## Progi
-
-Domyślny minimalny pojedynczy zakup: 1000 USD, bezwzględnie duży zakup: 5000 USD, zakup ≥25% wolumenu, seria jednego portfela ≥2500 USD w 5 min, kilka portfeli ≥6000 USD w 5 min. Zmień progi w `config.json`. Obserwacja co 5 minut oznacza opóźnienie i możliwe przeoczenia na bardzo płynnych rynkach.
-
-## Ograniczenia
-
-- GitHub może **opóźniać lub pomijać** zadania cron. `schedule` w publicznym repozytorium może zostać automatycznie wyłączone po 60 dniach bez aktywności.
-- Pierwsze znalezienie wydarzeń bywa długie. Repozytorium publiczne udostępnia kod i może ujawniać zanonimizowaną/pseudonimizowaną historię transakcji w artefaktach, ale token i ID czatu są trzymane w sekcji Secrets.
-- API Polymarket może ograniczać żądania albo zmieniać schemat. Limit `max_events` może spowodować niepełne wykrycie wydarzeń; bot zapisuje ostrzeżenie w logach Actions.
-- Dane o transakcjach nie dowodzą ustawiania meczu. Bot nie zawiera zakładów i nie jest wskazówką inwestycyjną.
-- Przewiduj, że artefakty są usuwane po 24h, gdy zadanie długo nie działa. Gdy pojawi się ponownie, zacznie od nowa, nie wysyłając starych transakcji.
-
-## Diagnose błędu
-
-Otwórz **Actions**, kliknij ostatni przebieg, następnie `scan`. W kroku skanowania zobaczysz np. `Odkryto ... wydarzeń` albo błąd API. Jeśli test Telegram nie przyjdzie, sprawdź oba sekrety i czy rozpocząłeś rozmowę z botem.
-
-Oficjalne źródła:
-- https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
-- https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
-- https://github.com/pricing
-- https://data-api.polymarket.com/v2/docs
+W paczce wdrożeniowej są tylko pliki do podmiany i instrukcja; kod źródłowy był testowany na przykładowych, **fikcyjnych** danych (25 testów offline). Integracja na żywo z Twoim GitHubem i Telegramem nie była w tym wydaniu uruchamiana.

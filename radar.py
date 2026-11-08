@@ -59,11 +59,18 @@ DEFAULT = {
     "position_lower_usd": 900,
     "position_unknown_usd": 1700,
     "position_window_seconds": 21600,  # 6 godzin, zakupy BRUTTO a nie aktualna pozycja
+    "position_24h_lower_usd": 1500,
+    "position_24h_unknown_usd": 3500,
+    "position_24h_window_seconds": 86400,
+    "diagnostic_trade_logs": True,
+    "daily_summary_enabled": True,
+    "daily_summary_hour_local": 21,
+    "daily_summary_top_n": 10,
 
     "wallet_cluster_usd": 2500,
-    "multi_wallet_cluster_usd": 6000,
+    "multi_wallet_cluster_usd": 3000,
     "multi_wallet_min_wallets": 3,
-    "cluster_window_seconds": 300,
+    "cluster_window_seconds": 600,
     "alert_cooldown_seconds": 1800,
     "lookback_seconds": 300,
     "max_pages_per_batch": 12,
@@ -126,9 +133,15 @@ def load_config(path: Path) -> dict:
         raise ValueError("api_minimum_trade_usd nie moze przekraczac progu pojedynczego zakupu")
     if not 300 <= number(config["position_window_seconds"]) <= 86400:
         raise ValueError("position_window_seconds musi byc w zakresie 300-86400")
-    for key in ("single_buy_lower_usd", "single_buy_unknown_usd", "position_lower_usd", "position_unknown_usd"):
+    for key in ("single_buy_lower_usd", "single_buy_unknown_usd", "position_lower_usd", "position_unknown_usd", "position_24h_lower_usd", "position_24h_unknown_usd"):
         if number(config[key]) <= 0:
             raise ValueError(f"{key} musi byc dodatnie")
+    if not 21600 <= number(config["position_24h_window_seconds"]) <= 86400:
+        raise ValueError("position_24h_window_seconds musi być między 21600 a 86400")
+    if not 0 <= int(config["daily_summary_hour_local"]) <= 23:
+        raise ValueError("daily_summary_hour_local musi być w zakresie 0..23")
+    if not 1 <= int(config["daily_summary_top_n"]) <= 10:
+        raise ValueError("daily_summary_top_n musi być w zakresie 1..10")
     for key in ("poll_seconds", "discover_seconds", "cluster_window_seconds"):
         if number(config[key]) < 5:
             raise ValueError(f"{key} nie może być mniejsze niż 5")
@@ -216,6 +229,10 @@ class Database:
             CREATE TABLE IF NOT EXISTS wallet_stats (wallet TEXT PRIMARY KEY, count INTEGER, checked_at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS outbox (key TEXT PRIMARY KEY, queued_at INTEGER NOT NULL,
                 html_message TEXT NOT NULL, csv_row TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS trade_market_info (
+                condition_id TEXT PRIMARY KEY, title TEXT NOT NULL,
+                market_title TEXT NOT NULL, slug TEXT NOT NULL, tier TEXT NOT NULL
+            );
         """)
         self.conn.commit()
 
@@ -235,6 +252,26 @@ class Database:
                  trade["wallet"], trade["outcome"], trade["usd"], trade["price"]),
             )
         return cur.rowcount == 1
+
+    def remember_market(self, market: EventMarket) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO trade_market_info VALUES (?,?,?,?,?)",
+                (market.condition_id, market.title, market.market_title, market.event_slug, market.tier)
+            )
+
+    def daily_top_positions(self, since: int, until: int, limit: int) -> list[tuple]:
+        # Obserwowane zakupy brutto, a nie saldo portfela czy prawdziwe otwarte pozycje.
+        return self.conn.execute("""
+            SELECT i.title, i.market_title, i.slug, t.outcome, t.wallet,
+                   SUM(t.usd) AS total, COUNT(*) AS fills
+            FROM trades t
+            JOIN trade_market_info i ON i.condition_id = t.condition_id
+            WHERE t.timestamp >= ? AND t.timestamp < ? AND i.tier = 'lower'
+                  AND LENGTH(t.wallet) > 0
+            GROUP BY t.condition_id, t.outcome, t.wallet
+            ORDER BY total DESC, fills DESC LIMIT ?
+        """, (since, until, limit)).fetchall()
 
     def recent(self, condition_id: str, outcome: str, since: int, wallet: str | None = None) -> tuple[int, float, int]:
         query = "SELECT COUNT(*), COALESCE(SUM(usd),0), COUNT(DISTINCT wallet) FROM trades WHERE condition_id=? AND outcome=? AND timestamp>=?"
@@ -282,7 +319,8 @@ class Database:
 
     def cleanup(self, now: int) -> None:
         with self.conn:
-            self.conn.execute("DELETE FROM trades WHERE timestamp<?", (now - 86400,))
+            # Zapamiętaj co najmniej 48h: pełne okno 24h i ostatni dzienny raport.
+            self.conn.execute("DELETE FROM trades WHERE timestamp<?", (now - 3 * 86400,))
             self.conn.execute("DELETE FROM cooldowns WHERE sent_at<?", (now - 7 * 86400,))
             self.conn.execute("DELETE FROM wallet_stats WHERE checked_at<?", (now - 2 * 86400,))
 
@@ -296,6 +334,7 @@ class Radar:
         self.tag_ids: list[str] = []
         self.started = int(time.time())
         self.alerts_queued = 0
+        self.daily_reports_queued = 0
         self.last_discovery = 0.0
         self.csv_path = BASE / "alerty.csv"
         self.cache_path = BASE / "market_cache.json"
@@ -562,6 +601,7 @@ class Radar:
         heading = {
             "single": "💰 DUŻY ZAKUP NA MECZU CS2",
             "position": "🔁 PORTFEL ZBUDOWAŁ DUŻY WOLUMEN ZAKUPÓW",
+            "position24": "🕘 DUŻE ZAKUPY PORTFELA W CIĄGU 24H",
             "wallet": "🔁 SERIA ZAKUPÓW PORTFELA",
             "multi": "👥 KILKA PORTFELI NA TEN SAM WYNIK",
         }[kind]
@@ -576,10 +616,12 @@ class Radar:
             f"📊 Wolumen rynku wg Gamma: {('$' + format(volume, ',.0f')) if volume is not None else 'brak danych'}",
             f"📐 Zakup / wolumen z ostatniego odczytu: {ratio_str}",
         ]
-        if kind in ("single", "position"):
+        if kind in ("single", "position", "position24"):
+            hours = (int(self.cfg["position_24h_window_seconds"] / 3600)
+                     if kind == "position24" else int(self.cfg["position_window_seconds"] / 3600))
             lines.append(
                 f"📦 Zakupy tego portfela na ten wynik w ostatnich "
-                f"{int(self.cfg['position_window_seconds']/3600)} h: "
+                f"{hours} h: "
                 f"<b>${total:,.2f}</b> (liczba transakcji odczytanych przez radar: {n})"
             )
         elif kind in ("wallet", "multi"):
@@ -616,13 +658,14 @@ class Radar:
                 break
             # Kolejka chroni przed utratą wiadomości; nie jest to exactly-once:
             # przy awarii po wysłaniu, przed potwierdzeniem DB, alert może się powtórzyć.
-            self.write_csv(row)
+            if row:  # Raport dzienny nie jest alertem transakcyjnym do CSV.
+                self.write_csv(row)
             self.db.finish_alert(key, int(time.time()))
 
     def alert(self, key: str, kind: str, trade: dict, m: EventMarket, now: int,
-              total: float = 0, count: int = 0, unique: int = 0) -> None:
+              total: float = 0, count: int = 0, unique: int = 0) -> bool:
         if not self.db.can_alert(key, now, int(self.cfg["alert_cooldown_seconds"])):
-            return
+            return False
         note = self.wallet_history(trade["wallet"], now) if kind == "single" else ""
         msg = self.message(kind, m, trade, total, count, unique, note)
         row = [datetime.fromtimestamp(trade["timestamp"], timezone.utc).isoformat(), kind,
@@ -634,8 +677,49 @@ class Radar:
             print("\n" + re.sub(r"<[^>]*>", "", msg) + "\n")
             self.write_csv(row)
             self.db.record_alert(key, now)
-            return
+            return True
         self.db.queue_alert(key, now, msg, row)
+        return True
+
+    @staticmethod
+    def wallet_short(wallet: str) -> str:
+        return wallet[:8] + "…" + wallet[-4:] if len(wallet) >= 16 else (wallet or "brak")
+
+    def daily_summary(self, now: int) -> bool:
+        if not self.cfg["daily_summary_enabled"]:
+            return False
+        zone = ZoneInfo("Europe/Warsaw")
+        local_now = datetime.fromtimestamp(now, zone)
+        if local_now.hour < int(self.cfg["daily_summary_hour_local"]):
+            return False
+        local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        date_str = local_now.strftime("%Y-%m-%d")
+        key = "daily-summary:" + date_str
+        if not self.db.can_alert(key, now, 86400 * 3):
+            return False
+        rows = self.db.daily_top_positions(int(local_midnight.timestamp()), now + 1,
+                                          int(self.cfg["daily_summary_top_n"]))
+        title = f"📊 <b>CS2 RADAR — TOP ZAKUPY {date_str}</b>"
+        lines = [title, "Największe zaobserwowane zakupy BRUTTO jednego portfela na jeden wynik w niższych ligach.", ""]
+        for ix, (match, market_title, slug, outcome, wallet, total, fills) in enumerate(rows, 1):
+            match = match[:125]
+            outcome = outcome[:90]
+            link = f"https://polymarket.com/event/{slug}"
+            lines += [f"<b>{ix}. ${total:,.2f}</b> — {html.escape(outcome)} ({fills} zakupów)",
+                      f"🎮 {html.escape(match)}",
+                      f"👛 <code>{html.escape(self.wallet_short(wallet))}</code> · <a href=\"{html.escape(link, quote=True)}\">Mecz</a>", ""]
+        if not rows:
+            lines.append("Brak zapisanych zakupów ≥ progu API na rozpoznanych niższych ligach od północy.")
+        lines += ["ℹ️ To tylko transakcje zaobserwowane przez radar od początku dnia (PL), od progu API. Nie są to aktualne otwarte pozycje; sprzedaży nie odejmujemy. Dane mogą być niepełne."]
+        message = "\n".join(lines)
+        if self.dry_run:
+            LOG.info("DRY-RUN: raport dzienny: %d pozycji", len(rows))
+            self.db.record_alert(key, now)
+        else:
+            self.db.queue_alert(key, now, message, [])
+        self.daily_reports_queued += 1
+        LOG.info("RAPORT DZIENNY: %d portfeli/rynków, data %s (kolejka Telegram)", len(rows), date_str)
+        return True
 
     def process(self, raw: dict, cutoff: int) -> bool:
         trade = self.normalize(raw)
@@ -646,45 +730,66 @@ class Radar:
             return False
         if not self.db.add_trade(trade):
             return False
+        self.db.remember_market(m)
         now = int(time.time())
         volume = m.market_volume
         relative = (volume is not None and volume > 0 and
                     trade["usd"] / volume >= number(self.cfg["relative_market_volume"]))
         tiny = volume is not None and volume <= number(self.cfg["low_volume_market_usd"])
-        # Nizsze ligi: alarm juz przy zakupie 500 USD, niezaleznie od obrotu.
-        # Nierozpoznany tier: wyzszy prog, bo samo "unknown" nie oznacza Tier 3.
-        threshold = number(self.cfg["single_buy_lower_usd"] if m.tier == "lower"
+        low = m.tier == "lower"
+        threshold = number(self.cfg["single_buy_lower_usd"] if low
                            else self.cfg["single_buy_unknown_usd"])
-        pos_threshold = number(self.cfg["position_lower_usd"] if m.tier == "lower"
+        pos_threshold = number(self.cfg["position_lower_usd"] if low
                                else self.cfg["position_unknown_usd"])
-        # Pozostaw bardzo duze transakcje jako osobny powód alarmu; dodatkowe
-        # przeslanki (wielkosc relatywna / malo plynny rynek) NIE SA WYMAGANE dla lower.
+        pos24_threshold = number(self.cfg["position_24h_lower_usd"] if low
+                                 else self.cfg["position_24h_unknown_usd"])
         large_single = (trade["usd"] >= threshold or
                         trade["usd"] >= number(self.cfg["absolute_whale_usd"]) or
                         (trade["usd"] >= number(self.cfg["minimum_buy_usd"]) and (relative or tiny)))
-
+        signals: list[str] = []
+        reason = "poniżej progów"
         wallet = trade["wallet"]
         if wallet:
             since_position = trade["timestamp"] - int(self.cfg["position_window_seconds"])
-            pos_count, pos_sum, _ = self.db.recent(
-                trade["condition_id"], trade["outcome"], since_position, wallet
-            )
-            # Jeden wspolny cooldown dla alarmow pojedynczych i sumy zakupow.
+            pos_count, pos_sum, _ = self.db.recent(trade["condition_id"], trade["outcome"], since_position, wallet)
+            since_24 = trade["timestamp"] - int(self.cfg["position_24h_window_seconds"])
+            pos24_count, pos24_sum, _ = self.db.recent(trade["condition_id"], trade["outcome"], since_24, wallet)
             key = f"walletactivity:{trade['condition_id']}:{wallet}:{trade['outcome']}"
             if large_single:
-                self.alert(key, "single", trade, m, now, pos_sum, pos_count, 1)
+                if self.alert(key, "single", trade, m, now, pos_sum, pos_count, 1):
+                    signals.append("single")
+                else:
+                    reason = "cooldown/alert już w kolejce"
             elif pos_count >= 2 and pos_sum >= pos_threshold:
-                self.alert(key, "position", trade, m, now, pos_sum, pos_count, 1)
+                if self.alert(key, "position", trade, m, now, pos_sum, pos_count, 1):
+                    signals.append("position6h")
+                else:
+                    reason = "cooldown/alert już w kolejce"
+            elif pos24_count >= 2 and pos24_sum >= pos24_threshold:
+                if self.alert(key, "position24", trade, m, now, pos24_sum, pos24_count, 1):
+                    signals.append("position24h")
+                else:
+                    reason = "cooldown/alert już w kolejce"
+            else:
+                reason = f"zakup < ${threshold:,.0f}; portfel 6h ${pos_sum:,.0f}/${pos_threshold:,.0f}, 24h ${pos24_sum:,.0f}/${pos24_threshold:,.0f}"
         elif large_single:
             key = f"single-nonwallet:{trade['condition_id']}:{trade['id']}"
-            self.alert(key, "single", trade, m, now, trade["usd"], 1, 0)
+            if self.alert(key, "single", trade, m, now, trade["usd"], 1, 0):
+                signals.append("single")
+        else:
+            reason = f"brak identyfikatora portfela; zakup < ${threshold:,.0f}"
 
-        # Niezalezny sygnal kilku roznych portfeli kupujacych ten sam wynik.
         since = trade["timestamp"] - int(self.cfg["cluster_window_seconds"])
         n, total, unique = self.db.recent(trade["condition_id"], trade["outcome"], since)
         if unique >= int(self.cfg["multi_wallet_min_wallets"]) and total >= number(self.cfg["multi_wallet_cluster_usd"]):
             key = f"clustermulti:{trade['condition_id']}:{trade['outcome']}"
-            self.alert(key, "multi", trade, m, now, total, n, unique)
+            if self.alert(key, "multi", trade, m, now, total, n, unique):
+                signals.append("multi-wallet")
+        if self.cfg["diagnostic_trade_logs"]:
+            verdict = "ALERT " + ",".join(signals) if signals else "BRAK ALERTU " + reason
+            LOG.info("TX | %s | %s | %s | $%.2f | portfel %s | %s",
+                     m.tier, m.title[:90].replace("|", "/"), trade["outcome"][:45].replace("|", "/"),
+                     trade["usd"], self.wallet_short(wallet), verdict)
         return True
 
     def poll(self) -> None:
@@ -707,6 +812,7 @@ class Radar:
             chunk = self.event_ids[start:start + 20]
             cursor: str | None = None
             batch_done = False
+            batch_rows: list[dict] = []
             for page_idx in range(int(self.cfg["max_pages_per_batch"])):
                 params: dict[str, Any] = {
                     "event_id": ",".join(chunk), "taker_only": "false", "side": "BUY",
@@ -719,10 +825,11 @@ class Radar:
                 if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
                     raise RuntimeError("Data API /v2/trades: nieoczekiwany format odpowiedzi")
                 rows: list[dict] = payload["data"]
-                # Najpierw przetwórz chronologicznie, by poprawnie łączyć klastry.
+                # Zbierz pełną paczkę stron: API zwraca od najnowszych.
+                # Przetwarzanie chronologiczne po CAŁEJ paczce chroni
+                # przed błędami łączenia zakupów w klastrach i oknach 6/24h.
                 fresh = [r for r in rows if isinstance(r, dict) and int(number(r.get("timestamp"))) >= cutoff]
-                for item in sorted(fresh, key=lambda r: int(number(r.get("timestamp")))):
-                    processed += int(self.process(item, cutoff))
+                batch_rows.extend(fresh)
                 older_found = any(int(number(r.get("timestamp"))) < cutoff for r in rows if isinstance(r, dict))
                 page_info = payload.get("pagination") or {}
                 next_cursor = page_info.get("next_cursor")
@@ -730,11 +837,14 @@ class Radar:
                     batch_done = True
                     break
                 cursor = str(next_cursor)
+            for item in sorted(batch_rows, key=lambda r: int(number(r.get("timestamp")))):
+                processed += int(self.process(item, cutoff))
             if not batch_done:
                 LOG.warning("Limit paginacji osiągnięty w paczce eventów %s. Możliwa utrata części zakładów. Zwiększ max_pages_per_batch.", ",".join(chunk[:3]))
                 coverage_complete = False
         if coverage_complete:
             self.db.set_meta("last_successful_poll", str(now))
+        self.daily_summary(now)
         self.db.cleanup(now)
         self.flush_outbox()
         LOG.info("Skan: %d nowych transakcji >= $%s (%d wydarzeń), %d nowych sygnałów",
