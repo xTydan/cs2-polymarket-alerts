@@ -4,7 +4,7 @@ name: CS2 Polymarket Radar
 "on":
   schedule:
     # Automatyczne skanowanie co 5 minut
-    - cron: '3-59/5 * * * *'
+    - cron: '4-59/5 * * * *'
 
   workflow_dispatch:
     inputs:
