@@ -1,0 +1,23 @@
+{
+  "poll_seconds": 25,
+  "discover_seconds": 1200,
+  "minimum_buy_usd": 1000,
+  "absolute_whale_usd": 5000,
+  "relative_market_volume": 0.25,
+  "low_volume_market_usd": 5000,
+  "api_minimum_trade_usd": 200,
+  "wallet_cluster_usd": 2500,
+  "multi_wallet_cluster_usd": 6000,
+  "multi_wallet_min_wallets": 3,
+  "cluster_window_seconds": 300,
+  "alert_cooldown_seconds": 240,
+  "lookback_seconds": 540,
+  "max_pages_per_batch": 30,
+  "max_events": 5000,
+  "max_market_volume_unknown_usd": 40000,
+  "exclude_major_tournaments": true,
+  "wallet_history_check": true,
+  "wallet_low_trade_count": 5,
+  "send_startup_notification": false,
+  "test_mode": false
+}
