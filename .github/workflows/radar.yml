@@ -1,11 +1,8 @@
-
 name: CS2 Polymarket Radar
 
+# Zadanie co 5 minut uruchamia cron-job.org poprzez GitHub API.
+# Brak 'schedule', aby nie dublowac skanow.
 "on":
-  schedule:
-    # Automatyczne skanowanie co 5 minut
-    - cron: '4-59/5 * * * *'
-
   workflow_dispatch:
     inputs:
       test_telegram:
@@ -26,13 +23,11 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     timeout-minutes: 12
-
     env:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       GH_TOKEN: ${{ github.token }}
       GH_REPOSITORY: ${{ github.repository }}
-
     steps:
       - name: Pobierz repozytorium
         uses: actions/checkout@v4
@@ -58,14 +53,45 @@ jobs:
           fi
 
       - name: Zapisz stan
-        if: ${{ always() && inputs.test_telegram != true }}
+        if: ${{ success() && inputs.test_telegram != true }}
         run: python github_state.py backup
 
       - name: Przechowuj stan do kolejnego skanu
-        if: ${{ always() && inputs.test_telegram != true }}
+        if: ${{ success() && inputs.test_telegram != true }}
         uses: actions/upload-artifact@v4
         with:
           name: radar-state
           path: state/
-          retention-days: 1
-          if-no-files-found: ignore
+          retention-days: 2
+          if-no-files-found: error
+
+      - name: Zbuduj panel historii
+        if: ${{ success() && inputs.test_telegram != true }}
+        run: python build_dashboard.py
+
+      - name: Skonfiguruj GitHub Pages
+        if: ${{ success() && inputs.test_telegram != true }}
+        uses: actions/configure-pages@v5
+
+      - name: Wyslij strone do GitHub Pages
+        if: ${{ success() && inputs.test_telegram != true }}
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: public/
+
+  deploy:
+    name: Opublikuj panel
+    needs: scan
+    if: ${{ needs.scan.result == 'success' && inputs.test_telegram != true }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+      contents: read
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Opublikuj na GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
