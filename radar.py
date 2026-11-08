@@ -319,8 +319,8 @@ class Database:
 
     def cleanup(self, now: int) -> None:
         with self.conn:
-            # Zapamiętaj co najmniej 48h: pełne okno 24h i ostatni dzienny raport.
-            self.conn.execute("DELETE FROM trades WHERE timestamp<?", (now - 3 * 86400,))
+            # Historia dashboardu: przechowuj 30 dni. 24h wystarcza do liczenia alertow.
+            self.conn.execute("DELETE FROM trades WHERE timestamp<?", (now - 30 * 86400,))
             self.conn.execute("DELETE FROM cooldowns WHERE sent_at<?", (now - 7 * 86400,))
             self.conn.execute("DELETE FROM wallet_stats WHERE checked_at<?", (now - 2 * 86400,))
 
