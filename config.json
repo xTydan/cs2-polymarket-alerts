@@ -5,12 +5,12 @@
   "absolute_whale_usd": 5000,
   "relative_market_volume": 0.25,
   "low_volume_market_usd": 5000,
-  "api_minimum_trade_usd": 200,
+  "api_minimum_trade_usd": 100,
   "wallet_cluster_usd": 2500,
   "multi_wallet_cluster_usd": 6000,
   "multi_wallet_min_wallets": 3,
   "cluster_window_seconds": 300,
-  "alert_cooldown_seconds": 240,
+  "alert_cooldown_seconds": 1800,
   "lookback_seconds": 540,
   "max_pages_per_batch": 30,
   "max_events": 5000,
@@ -19,5 +19,10 @@
   "wallet_history_check": true,
   "wallet_low_trade_count": 5,
   "send_startup_notification": false,
-  "test_mode": false
+  "test_mode": false,
+  "single_buy_lower_usd": 500,
+  "single_buy_unknown_usd": 1000,
+  "position_lower_usd": 900,
+  "position_unknown_usd": 1700,
+  "position_window_seconds": 21600
 }
