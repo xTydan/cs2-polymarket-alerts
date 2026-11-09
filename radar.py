@@ -544,7 +544,7 @@ class Database:
         suffix = f":{outcome}"
         rows = list(self.conn.execute(
             "SELECT key FROM cooldowns WHERE sent_at>=?", (now - seconds,)
-        )) + list(self.conn.execute("SELECT key FROM outbox WHERE key LIKE 'priority:%'"))
+        )) + list(self.conn.execute("SELECT key FROM outbox WHERE key LIKE 'priority%'"))
         return any(key == multi or (key.startswith(prefix) and key.endswith(suffix))
                    for (key,) in rows)
 
