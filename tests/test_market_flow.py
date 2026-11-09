@@ -158,7 +158,7 @@ class MarketFlowStorageTests(unittest.TestCase):
         self.radar.flush_outbox()
         self.assertIn("NAGŁE PRZECHYLENIE", self.client.messages[0])
         self.assertIn("Map 2 Winner", self.client.messages[0])
-        self.assertIn("wallet", self.client.messages[0].lower())
+        self.assertIn("portfeli", self.client.messages[0].lower())
         self.radar.flow_conditions.add(COND1)
         self.radar.market_flow_alerts(now + 10)
         self.assertEqual(self.db.pending_alerts(), [])
