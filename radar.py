@@ -90,6 +90,21 @@ DEFAULT = {
     "normal_cooldown_seconds": 3600,
     "normal_digest_interval_seconds": 900,
     "normal_digest_top_n": 10,
+    # v1.8: polityka alertow. Wszystkie zakupy zachowujemy, alerty tylko >= 1.20.
+    "alert_min_odds": 1.20,
+    "alert_odds_bands": [
+        {"min_odds": 1.20, "min_usd": 5000},
+        {"min_odds": 1.50, "min_usd": 2500},
+        {"min_odds": 1.70, "min_usd": 1500},
+        {"min_odds": 2.00, "min_usd": 1000},
+        {"min_odds": 3.00, "min_usd": 750},
+        {"min_odds": 5.00, "min_usd": 500},
+    ],
+    "unknown_tier_threshold_multiplier": 1.5,
+    "position_6h_threshold_multiplier": 0.60,
+    "position_24h_threshold_multiplier": 0.90,
+    "priority_threshold_multiplier": 1.50,
+    "priority_min_usd": 1800,
 }
 
 
@@ -163,7 +178,40 @@ def load_config(path: Path) -> dict:
             raise ValueError(f"{key} musi byc dodatnie")
     if not 1 <= int(config["normal_digest_top_n"]) <= 15:
         raise ValueError("normal_digest_top_n musi byc w zakresie 1..15")
+    if not 1 <= number(config["alert_min_odds"]) <= 20:
+        raise ValueError("alert_min_odds musi byc w zakresie 1..20")
+    bands = config["alert_odds_bands"]
+    if (not isinstance(bands, list) or not bands or
+        any(not isinstance(b,dict) or number(b.get('min_odds')) < 1 or
+            number(b.get('min_usd')) < number(config['api_minimum_trade_usd'])
+            for b in bands)):
+        raise ValueError("alert_odds_bands: niepoprawna lista progow")
+    if sorted(float(b['min_odds']) for b in bands) != [float(b['min_odds']) for b in bands]:
+        raise ValueError("alert_odds_bands musi byc posortowane po min_odds")
+    if float(bands[0]['min_odds']) > float(config['alert_min_odds']):
+        raise ValueError("alert_odds_bands musi zawierac prog nie wyzszy niz alert_min_odds")
+    for key in ('unknown_tier_threshold_multiplier', 'position_6h_threshold_multiplier',
+                'position_24h_threshold_multiplier','priority_threshold_multiplier','priority_min_usd'):
+        if number(config[key]) <= 0:
+            raise ValueError(f"{key} musi byc dodatnie")
     return config
+
+
+def min_alert_usd(odds: float, tier: str, config: dict) -> float:
+    """Próg pojedynczego sygnału na podstawie kursu wejścia i tieru.
+    Zwraca inf, gdy kurs jest ponizej minimum.
+    """
+    if odds < number(config["alert_min_odds"]):
+        return float('inf')
+    amount = number(config['alert_odds_bands'][0]['min_usd'])
+    for band in config['alert_odds_bands']:
+        if odds >= number(band['min_odds']):
+            amount = number(band['min_usd'])
+        else:
+            break
+    if tier != 'lower':
+        amount *= number(config['unknown_tier_threshold_multiplier'])
+    return amount
 
 
 class ApiClient:
@@ -264,6 +312,12 @@ class Database:
         """)
         self._add_column("trades", "side", "TEXT NOT NULL DEFAULT 'BUY'")
         self._add_column("trades", "trader_name", "TEXT NOT NULL DEFAULT ''")
+        self._add_column("signal_candidates", "avg_odds", "REAL NOT NULL DEFAULT 0")
+        # Dla sygnalow z v1.7 odzyskaj kurs z pierwotnej transakcji.
+        # Bez tego stare pozycje mialyby w nowym digescie kurs 0.00.
+        self.conn.execute("""UPDATE signal_candidates SET avg_odds=COALESCE(
+            (SELECT 1.0 / t.price FROM trades t WHERE t.id=signal_candidates.id),0)
+            WHERE avg_odds=0""")
         self._add_column("trade_market_info", "outcomes_json", "TEXT NOT NULL DEFAULT '[]'")
         self._add_column("trade_market_info", "event_id", "TEXT NOT NULL DEFAULT ''")
         self.conn.commit()
@@ -303,18 +357,19 @@ class Database:
                  market.tier, json.dumps(market.outcomes, ensure_ascii=False), market.event_id)
             )
 
-    def daily_top_positions(self, since: int, until: int, limit: int) -> list[tuple]:
+    def daily_top_positions(self, since: int, until: int, limit: int, min_odds: float = 1.2) -> list[tuple]:
         # Obserwowane zakupy brutto, a nie saldo portfela czy prawdziwe otwarte pozycje.
         return self.conn.execute("""
             SELECT i.title, i.market_title, i.slug, t.outcome, t.wallet,
-                   SUM(t.usd) AS total, COUNT(*) AS fills
+                   SUM(t.usd) AS total, COUNT(*) AS fills,
+                   SUM(t.usd / t.price) / NULLIF(SUM(t.usd),0) AS avg_odds
             FROM trades t
             JOIN trade_market_info i ON i.condition_id = t.condition_id
             WHERE t.timestamp >= ? AND t.timestamp < ? AND i.tier = 'lower'
-                  AND LENGTH(t.wallet) > 0
+                  AND LENGTH(t.wallet) > 0 AND t.price <= 1.0 / ?
             GROUP BY t.condition_id, t.outcome, t.wallet
             ORDER BY total DESC, fills DESC LIMIT ?
-        """, (since, until, limit)).fetchall()
+        """, (since, until, min_odds, limit)).fetchall()
 
     def recent(self, condition_id: str, outcome: str, since: int, wallet: str | None = None) -> tuple[int, float, int]:
         query = "SELECT COUNT(*), COALESCE(SUM(usd),0), COUNT(DISTINCT wallet) FROM trades WHERE condition_id=? AND outcome=? AND timestamp>=?"
@@ -324,6 +379,22 @@ class Database:
             args.append(wallet)
         count, value, unique = self.conn.execute(query, args).fetchone()
         return int(count), float(value), int(unique)
+
+    def recent_qualified(self, condition_id: str, outcome: str, since: int,
+                         min_odds: float, wallet: str | None = None) -> tuple[int, float, int, float]:
+        """Liczy tylko zakupy o kursie >= minimum; zwraca sredni kurs bazowy.
+        Wazenie udzialami: sredni kurs = suma nabytych udzialow / USD.
+        """
+        query = """SELECT COUNT(*), COALESCE(SUM(usd),0), COUNT(DISTINCT wallet),
+                   COALESCE(SUM(usd / price),0)
+                   FROM trades WHERE condition_id=? AND outcome=?
+                   AND timestamp>=? AND price<=?"""
+        args: list[Any] = [condition_id, outcome, since, 1.0 / min_odds]
+        if wallet:
+            query += ' AND wallet=?'
+            args.append(wallet)
+        count, usd, wallets, shares = self.conn.execute(query, args).fetchone()
+        return int(count), float(usd), int(wallets), float(shares) / float(usd) if usd else 0.0
 
     def can_alert(self, key: str, now: int, cooldown: int) -> bool:
         pending = self.conn.execute("SELECT 1 FROM outbox WHERE key=?", (key,)).fetchone()
@@ -360,7 +431,8 @@ class Database:
         with self.conn:
             self.conn.execute("INSERT OR REPLACE INTO wallet_stats VALUES (?,?,?)", (wallet, count, now))
 
-    def queue_normal_signal(self, trade: dict, kind: str, now: int, cooldown: int) -> bool:
+    def queue_normal_signal(self, trade: dict, kind: str, now: int, cooldown: int,
+                            total_usd: float | None = None, avg_odds: float | None = None) -> bool:
         # Ograniczamy powtorzenia jednego portfela / wyniku, ale trzymamy zakup w trades.
         wallet = trade.get("wallet") or trade["id"]
         key = f"normal:{trade['condition_id']}:{trade['outcome']}:{wallet}"
@@ -370,15 +442,23 @@ class Database:
                 return False
             self.conn.execute("INSERT OR REPLACE INTO signal_throttle VALUES (?,?)", (key, now))
             self.conn.execute("""INSERT OR IGNORE INTO signal_candidates
-                (id,created_at,condition_id,outcome,wallet,kind,usd,batch_key)
-                VALUES (?,?,?,?,?,?,?,'')""",
+                (id,created_at,condition_id,outcome,wallet,kind,usd,batch_key,avg_odds)
+                VALUES (?,?,?,?,?,?,?,'',?)""",
                 (trade['id'], now, trade['condition_id'], trade['outcome'],
-                 trade.get('wallet') or '', kind, trade['usd']))
+                 trade.get('wallet') or '', kind,
+                 float(total_usd if total_usd is not None else trade['usd']),
+                 float(avg_odds if avg_odds is not None else 1 / trade['price'])))
             return True
+
+    def discard_old_low_odds_signals(self, minimum_odds: float) -> int:
+        # Zwykle alerty z poprzedniej wersji po 1.01 nie powinny wracac.
+        with self.conn:
+            cur=self.conn.execute("DELETE FROM signal_candidates WHERE batch_key='' AND avg_odds<?", (minimum_odds,))
+        return cur.rowcount
 
     def pending_normal_signals(self) -> list[tuple]:
         return self.conn.execute("""SELECT s.condition_id, s.outcome, s.kind, s.usd,
-            COALESCE(i.title,'Nieznany mecz'), COALESCE(i.slug,''), s.wallet
+            COALESCE(i.title,'Nieznany mecz'), COALESCE(i.slug,''), s.wallet, s.avg_odds
             FROM signal_candidates s
             LEFT JOIN trade_market_info i ON i.condition_id=s.condition_id
             WHERE s.batch_key='' ORDER BY s.created_at, s.id""").fetchall()
@@ -418,6 +498,10 @@ class Radar:
         self.last_discovery = 0.0
         self.csv_path = BASE / "alerty.csv"
         self.cache_path = BASE / "market_cache.json"
+        skipped = self.db.discard_old_low_odds_signals(number(self.cfg['alert_min_odds']))
+        if skipped:
+            LOG.info('Odrzucono %d starych sygnalow ponizej minimalnego kursu %.2f',
+                     skipped, number(self.cfg['alert_min_odds']))
         self.load_market_cache()
 
     def cache_signature(self) -> str:
@@ -667,7 +751,7 @@ class Radar:
         return ""
 
     def message(self, kind: str, market: EventMarket, trade: dict, total: float, n: int, unique: int,
-                wallet_note: str = "") -> str:
+                wallet_note: str = "", avg_odds: float | None = None) -> str:
         e = html.escape
         odds = (1 / trade["price"]) if trade["price"] > 0 else 0
         volume = market.market_volume
@@ -696,6 +780,8 @@ class Radar:
             f"📊 Wolumen rynku wg Gamma: {('$' + format(volume, ',.0f')) if volume is not None else 'brak danych'}",
             f"📐 Zakup / wolumen z ostatniego odczytu: {ratio_str}",
         ]
+        if avg_odds is not None and avg_odds >= number(self.cfg['alert_min_odds']):
+            lines.append(f"⚖️ Kurs średni kwalifikujących się zakupów ≈ {avg_odds:.2f}")
         if kind in ("single", "position", "position24"):
             hours = (int(self.cfg["position_24h_window_seconds"] / 3600)
                      if kind == "position24" else int(self.cfg["position_window_seconds"] / 3600))
@@ -744,11 +830,11 @@ class Radar:
 
     def alert(self, key: str, kind: str, trade: dict, m: EventMarket, now: int,
               total: float = 0, count: int = 0, unique: int = 0,
-              cooldown: int | None = None) -> bool:
+              cooldown: int | None = None, avg_odds: float | None = None) -> bool:
         if not self.db.can_alert(key, now, int(cooldown or self.cfg["alert_cooldown_seconds"])):
             return False
         note = self.wallet_history(trade["wallet"], now) if kind == "single" else ""
-        msg = self.message(kind, m, trade, total, count, unique, note)
+        msg = self.message(kind, m, trade, total, count, unique, note, avg_odds)
         row = [datetime.fromtimestamp(trade["timestamp"], timezone.utc).isoformat(), kind,
                m.title, m.market_title, trade["outcome"], trade["usd"], total,
                unique, trade["wallet"], m.link]
@@ -775,11 +861,12 @@ class Radar:
             LOG.info("DIGEST: oczekuje %d sygnalow do nastepnej paczki", len(rows))
             return False
         grouped: dict[tuple, dict] = {}
-        for condition, outcome, kind, usd, title, slug, wallet in rows:
+        for condition, outcome, kind, usd, title, slug, wallet, avg_odds in rows:
             key = (condition, outcome)
             entry = grouped.setdefault(key, {"title": title, "outcome": outcome,
-                                             "slug": slug, "usd": 0., "n": 0, "wallets": set()})
+                                             "slug": slug, "usd": 0., "shares": 0., "n": 0, "wallets": set()})
             entry["usd"] += float(usd)
+            entry["shares"] += float(usd) * float(avg_odds)
             entry["n"] += 1
             if wallet:
                 entry["wallets"].add(wallet)
@@ -788,7 +875,7 @@ class Radar:
                  "Zebrane sygnały dużych zakupów od poprzedniego raportu. Nie są to wszystkie zakupy rynku.", ""]
         for ix, entry in enumerate(ranked[:int(self.cfg["normal_digest_top_n"])], 1):
             lines.append(f"<b>{ix}. {html.escape(str(entry['outcome'])[:45])}</b> — ${entry['usd']:,.0f}")
-            lines.append(f"🎮 {html.escape(str(entry['title'])[:80])}")
+            lines.append(f"🎮 {html.escape(str(entry['title'])[:80])} · kurs śr. ≈ {entry['shares']/entry['usd']:.2f}")
             lines.append(f"{entry['n']} sygn., {len(entry['wallets'])} portfeli")
             slug = str(entry['slug'])
             if re.fullmatch(r"[A-Za-z0-9_-]{1,180}", slug):
@@ -825,19 +912,20 @@ class Radar:
         if not self.db.can_alert(key, now, 86400 * 3):
             return False
         rows = self.db.daily_top_positions(int(local_midnight.timestamp()), now + 1,
-                                          int(self.cfg["daily_summary_top_n"]))
+                                          int(self.cfg["daily_summary_top_n"]),
+                                          float(self.cfg["alert_min_odds"]))
         title = f"📊 <b>CS2 RADAR — TOP ZAKUPY {date_str}</b>"
         lines = [title, "Największe zaobserwowane zakupy BRUTTO jednego portfela na jeden wynik w niższych ligach.", ""]
-        for ix, (match, market_title, slug, outcome, wallet, total, fills) in enumerate(rows, 1):
+        for ix, (match, market_title, slug, outcome, wallet, total, fills, avg_odds) in enumerate(rows, 1):
             match = match[:125]
             outcome = outcome[:90]
             link = f"https://polymarket.com/event/{slug}"
-            lines += [f"<b>{ix}. ${total:,.2f}</b> — {html.escape(outcome)} ({fills} zakupów)",
+            lines += [f"<b>{ix}. ${total:,.2f}</b> — {html.escape(outcome)} ({fills} zakupów, kurs śr. ≈ {avg_odds:.2f})",
                       f"🎮 {html.escape(match)}",
                       f"👛 <code>{html.escape(self.wallet_short(wallet))}</code> · <a href=\"{html.escape(link, quote=True)}\">Mecz</a>", ""]
         if not rows:
-            lines.append("Brak zapisanych zakupów ≥ progu API na rozpoznanych niższych ligach od północy.")
-        lines += ["ℹ️ To tylko transakcje zaobserwowane przez radar od początku dnia (PL), od progu API. Nie są to aktualne otwarte pozycje; sprzedaży nie odejmujemy. Dane mogą być niepełne."]
+            lines.append("Brak zapisanych zakupów po kursie >= minimum alertow na rozpoznanych niższych ligach od północy.")
+        lines += [f"ℹ️ Raport zawiera tylko zaobserwowane BUY po kursie >= {self.cfg['alert_min_odds']:.2f}, od początku dnia (PL). Nie są to aktualne otwarte pozycje ani pełny obrót; sprzedaży nie odejmujemy."]
         message = "\n".join(lines)
         if self.dry_run:
             LOG.info("DRY-RUN: raport dzienny: %d pozycji", len(rows))
@@ -859,77 +947,78 @@ class Radar:
             return False
         self.db.remember_market(m)
         now = int(time.time())
-        volume = m.market_volume
-        relative = (volume is not None and volume > 0 and
-                    trade["usd"] / volume >= number(self.cfg["relative_market_volume"]))
-        tiny = volume is not None and volume <= number(self.cfg["low_volume_market_usd"])
-        low = m.tier == "lower"
-        threshold = number(self.cfg["single_buy_lower_usd"] if low
-                           else self.cfg["single_buy_unknown_usd"])
-        pos_threshold = number(self.cfg["position_lower_usd"] if low
-                               else self.cfg["position_unknown_usd"])
-        pos24_threshold = number(self.cfg["position_24h_lower_usd"] if low
-                                 else self.cfg["position_24h_unknown_usd"])
-        large_single = (trade["usd"] >= threshold or
-                        trade["usd"] >= number(self.cfg["absolute_whale_usd"]) or
-                        (trade["usd"] >= number(self.cfg["minimum_buy_usd"]) and (relative or tiny)))
+        odds = 1.0 / trade['price']
+        minimum_odds = number(self.cfg['alert_min_odds'])
+        wallet = trade['wallet']
         signals: list[str] = []
-        reason = "poniżej progów"
-        wallet = trade["wallet"]
-        pos_count, pos_sum, pos24_count, pos24_sum = 0, 0., 0, 0.
+        if odds < minimum_odds:
+            # Nadal zapisujemy w bazie i w panelu; nie liczymy do klastrow alertowych.
+            if self.cfg['diagnostic_trade_logs']:
+                LOG.info('TX | %s | %s | %s | $%.2f | kurs %.2f | portfel %s | BRAK ALERTU: kurs < %.2f',
+                         m.tier, m.title[:90].replace('|','/'), trade['outcome'][:45],
+                         trade['usd'], odds, self.wallet_short(wallet), minimum_odds)
+            return True
+        threshold = min_alert_usd(odds, m.tier, self.cfg)
+        count6, usd6, odds6, count24, usd24, odds24 = 0, 0., 0., 0, 0., 0.
         if wallet:
-            pos_count, pos_sum, _ = self.db.recent(
-                trade["condition_id"], trade["outcome"],
-                trade["timestamp"] - int(self.cfg["position_window_seconds"]), wallet)
-            pos24_count, pos24_sum, _ = self.db.recent(
-                trade["condition_id"], trade["outcome"],
-                trade["timestamp"] - int(self.cfg["position_24h_window_seconds"]), wallet)
-        position6 = bool(wallet and pos_count >= 2 and pos_sum >= pos_threshold)
-        position24 = bool(wallet and pos24_count >= 2 and pos24_sum >= pos24_threshold)
-        priority_single = trade["usd"] >= number(self.cfg[
-            "priority_single_lower_usd" if low else "priority_single_unknown_usd"])
-        priority_position = bool(wallet and pos_count >= 2 and
-                                 pos_sum >= number(self.cfg["priority_position_usd"]))
-        # Wysoki priorytet: natychmiast, ale nie wiecej niz raz na 2h dla tego portfela / wyniku.
-        if priority_single or priority_position:
-            kind = "single" if priority_single else "position"
+            count6, usd6, _, odds6 = self.db.recent_qualified(
+                trade['condition_id'], trade['outcome'],
+                trade['timestamp'] - int(self.cfg['position_window_seconds']), minimum_odds, wallet)
+            count24, usd24, _, odds24 = self.db.recent_qualified(
+                trade['condition_id'], trade['outcome'],
+                trade['timestamp'] - int(self.cfg['position_24h_window_seconds']), minimum_odds, wallet)
+        threshold6 = min_alert_usd(odds6, m.tier, self.cfg) * number(self.cfg['position_6h_threshold_multiplier'])
+        threshold24 = min_alert_usd(odds24, m.tier, self.cfg) * number(self.cfg['position_24h_threshold_multiplier'])
+        single = trade['usd'] >= threshold
+        position6 = bool(wallet and count6 >= 2 and usd6 >= threshold6)
+        position24 = bool(wallet and count24 >= 2 and usd24 >= threshold24)
+        # Priorytet nie moze omijac filtra kursu i progow kwotowych.
+        instant_limit = max(threshold * number(self.cfg['priority_threshold_multiplier']),
+                            number(self.cfg['priority_min_usd']))
+        instant_single = trade['usd'] >= instant_limit
+        instant_position = bool(wallet and count6 >= 2 and usd6 >= 2 * threshold6)
+        reason = f'kwota ${trade["usd"]:,.0f}/${threshold:,.0f}; 6h ${usd6:,.0f}/${threshold6:,.0f}; 24h ${usd24:,.0f}/${threshold24:,.0f}'
+        if instant_single or instant_position:
+            kind = 'single' if instant_single else 'position'
             key = f"priority:{trade['condition_id']}:{wallet or trade['id']}:{trade['outcome']}"
-            if self.alert(key, kind, trade, m, now, pos_sum or trade["usd"],
-                          pos_count or 1, 1, cooldown=int(self.cfg["priority_cooldown_seconds"])):
-                signals.append("PILNE")
-            else:
-                reason = "priorytet: wyciszenie powtórzenia"
-        elif large_single or position6 or position24:
-            kind = "single" if large_single else ("position" if position6 else "position24")
-            if self.db.queue_normal_signal(trade, kind, now,
-                                           int(self.cfg["normal_cooldown_seconds"])):
-                signals.append("DO ZBIORCZEGO")
+            if self.alert(key,kind,trade,m,now,usd6 or trade['usd'],count6 or 1,1,
+                          cooldown=int(self.cfg['priority_cooldown_seconds']),
+                          avg_odds=odds6 or odds):
+                signals.append('PILNE')
+            else: reason='priorytet juz wyslany (cooldown)'
+        elif single or position6 or position24:
+            kind = 'single' if single else ('position' if position6 else 'position24')
+            displayed = trade['usd'] if single else (usd6 if position6 else usd24)
+            effective = odds if single else (odds6 if position6 else odds24)
+            if self.db.queue_normal_signal(trade,kind,now,int(self.cfg['normal_cooldown_seconds']),
+                                           total_usd=displayed,avg_odds=effective):
+                signals.append('DO ZBIORCZEGO')
                 self.normal_signals_queued += 1
-            else:
-                reason = "sygnał już zarejestrowany dla tego portfela / wyniku (1h)"
-        else:
-            reason = (f"zakup ${trade['usd']:,.0f} < ${threshold:,.0f}; "
-                      f"portfel 6h ${pos_sum:,.0f}/${pos_threshold:,.0f}, "
-                      f"24h ${pos24_sum:,.0f}/${pos24_threshold:,.0f}")
-
-        since = trade["timestamp"] - int(self.cfg["cluster_window_seconds"])
-        n, total, unique = self.db.recent(trade["condition_id"], trade["outcome"], since)
-        if unique >= int(self.cfg["multi_wallet_min_wallets"]) and total >= number(self.cfg["multi_wallet_cluster_usd"]):
-            if total >= number(self.cfg["priority_cluster_usd"]):
-                key = f"priority-multi:{trade['condition_id']}:{trade['outcome']}"
-                if self.alert(key, "multi", trade, m, now, total, n, unique,
-                              cooldown=int(self.cfg["priority_cooldown_seconds"])):
-                    signals.append("PILNE KLASTER")
+            else: reason='sygnal juz zarejestrowany dla portfela/wyniku (cooldown)'
+        # Klaster liczymy tylko z zakupow o kursie >= alert_min_odds.
+        since=trade['timestamp'] - int(self.cfg['cluster_window_seconds'])
+        n,total,unique,cluster_odds=self.db.recent_qualified(
+            trade['condition_id'],trade['outcome'],since,minimum_odds)
+        cluster_min=max(number(self.cfg['multi_wallet_cluster_usd']),
+                        min_alert_usd(cluster_odds,m.tier,self.cfg))
+        if unique>=int(self.cfg['multi_wallet_min_wallets']) and total>=cluster_min:
+            if total>=max(number(self.cfg['priority_cluster_usd']),cluster_min*1.5):
+                key=f"priority-multi:{trade['condition_id']}:{trade['outcome']}"
+                if self.alert(key,'multi',trade,m,now,total,n,unique,
+                              cooldown=int(self.cfg['priority_cooldown_seconds']),
+                              avg_odds=cluster_odds):
+                    signals.append('PILNE KLASTER')
             elif not signals:
-                if self.db.queue_normal_signal(trade, "multi", now,
-                                               int(self.cfg["normal_cooldown_seconds"])):
-                    signals.append("KLASTER DO ZBIORCZEGO")
+                if self.db.queue_normal_signal(trade,'multi',now,
+                                               int(self.cfg['normal_cooldown_seconds']),
+                                               total_usd=total,avg_odds=cluster_odds):
+                    signals.append('KLASTER DO ZBIORCZEGO')
                     self.normal_signals_queued += 1
-        if self.cfg["diagnostic_trade_logs"]:
-            verdict = "ALERT " + ",".join(signals) if signals else "BRAK ALERTU " + reason
-            LOG.info("TX | %s | %s | %s | $%.2f | portfel %s | %s",
-                     m.tier, m.title[:90].replace("|", "/"), trade["outcome"][:45].replace("|", "/"),
-                     trade["usd"], self.wallet_short(wallet), verdict)
+        if self.cfg['diagnostic_trade_logs']:
+            verdict = 'ALERT '+','.join(signals) if signals else 'BRAK ALERTU '+reason
+            LOG.info('TX | %s | %s | %s | $%.2f | kurs %.2f | portfel %s | %s',
+                     m.tier,m.title[:90].replace('|','/'),trade['outcome'][:45].replace('|','/'),
+                     trade['usd'],odds,self.wallet_short(wallet),verdict)
         return True
 
     def poll(self) -> None:

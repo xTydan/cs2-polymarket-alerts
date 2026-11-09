@@ -39,5 +39,37 @@
   "priority_cooldown_seconds": 7200,
   "normal_cooldown_seconds": 3600,
   "normal_digest_interval_seconds": 900,
-  "normal_digest_top_n": 10
+  "normal_digest_top_n": 10,
+  "alert_min_odds": 1.2,
+  "alert_odds_bands": [
+    {
+      "min_odds": 1.2,
+      "min_usd": 5000
+    },
+    {
+      "min_odds": 1.5,
+      "min_usd": 2500
+    },
+    {
+      "min_odds": 1.7,
+      "min_usd": 1500
+    },
+    {
+      "min_odds": 2.0,
+      "min_usd": 1000
+    },
+    {
+      "min_odds": 3.0,
+      "min_usd": 750
+    },
+    {
+      "min_odds": 5.0,
+      "min_usd": 500
+    }
+  ],
+  "unknown_tier_threshold_multiplier": 1.5,
+  "position_6h_threshold_multiplier": 0.6,
+  "position_24h_threshold_multiplier": 0.9,
+  "priority_threshold_multiplier": 1.5,
+  "priority_min_usd": 1800
 }
