@@ -79,7 +79,7 @@ class ResultsParser(HTMLParser):
                     pass
         if tag == "a" and attr.get("href", "").startswith("/matches/"):
             self.card["url"] = "https://www.hltv.org" + attr["href"].split("?")[0]
-        if "team" in classes or "team1" in classes or "team2" in classes:
+        if "team-cell" in classes or "team" in classes or "team1" in classes or "team2" in classes:
             if self.field is None:
                 self.field = "team"
                 self.field_depth = self.depth
@@ -113,10 +113,16 @@ def parse_results(html: str) -> list[dict]:
         teams = [norm(x) for x in card["teams"] if norm(x)]
         # HLTV has two named teams on a finished-match card.
         teams = list(dict.fromkeys(teams))
-        score_strings = re.findall(r"\b\d+\s*[-:]\s*\d+\b", " ".join(card["scores"]))
-        if len(teams) != 2 or len(score_strings) != 1:
+        # HLTV commonly renders <td class="result-score"><span>2</span><span>1</span></td>
+        # without a literal dash; the old parser discarded these results.
+        raw_score = " ".join(card["scores"])
+        score_pair = re.fullmatch(r"\s*(\d+)\s*[-:]?\s+(\d+)\s*", raw_score)
+        if score_pair is None:
+            # Also supports a compact "2-1" with no spaces.
+            score_pair = re.fullmatch(r"\s*(\d+)\s*[-:]\s*(\d+)\s*", raw_score)
+        if len(teams) != 2 or score_pair is None:
             continue
-        a, b = map(int, re.split(r"[-:]", score_strings[0]))
+        a, b = (int(score_pair.group(1)), int(score_pair.group(2)))
         if a == b or max(a, b) > 5 or not card["url"]:
             continue
         output.append({"teams": teams, "score": [a, b], "timestamp": card["timestamp"], "url": card["url"]})
@@ -173,7 +179,12 @@ def refresh(cache_path: Path, events: list[dict]) -> dict:
         results = parse_results(response.text)
         new = match_results(events, results, now)
         old.update(new)
-        print(f"HLTV: {len(results)} wynikow, {len(new)} dopasowanych meczow.")
+        if not results:
+            # A 200 response can still be a Cloudflare challenge or changed markup.
+            # Treat zero results as unavailable, not as proof no matches finished.
+            print(f"HLTV: parser nie znalazl wynikow (HTTP {response.status_code}, HTML {len(response.content)} B). Sprawdz Cloudflare/format strony.")
+        else:
+            print(f"HLTV: {len(results)} wynikow, {len(new)} dopasowanych meczow.")
     except (requests.RequestException, ValueError, UnicodeError) as err:
         print(f"HLTV: brak odczytu ({type(err).__name__}); zachowano potwierdzone wyniki.")
     cache_path.parent.mkdir(parents=True, exist_ok=True)
