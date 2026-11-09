@@ -8,7 +8,7 @@ class DashboardVisibilityTests(unittest.TestCase):
         self.assertIn(".fixture-when.live{background:", STYLE)
         self.assertIn(".fixture-when.upcoming{background:", STYLE)
         self.assertIn(".fixture-when.possible{background:", STYLE)
-        self.assertIn(".fixture-team{font-size:15px", STYLE)
+        self.assertIn(".fixture-teams,.fixture-team{font-size:15px", STYLE)
         self.assertIn(".fixture-total{font-size:17px}", STYLE)
         self.assertIn(".fixture-stage.active", STYLE)
 
