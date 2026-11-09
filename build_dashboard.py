@@ -125,9 +125,11 @@ def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000,
     for m in view_markets:
         key = str(m['s'] or (m['m'] if not m['m'].startswith('Nieznany mecz') else m['c'])).lower()
         entry = hltv_events.setdefault(key, {'key': key, 'title': m['m'],
-                                           'league': m.get('league') or '', 'start': 0})
+                                           'league': m.get('league') or '', 'start': 0,
+                                           'closed': True})
         if not entry['league'] and m.get('league'):
             entry['league'] = m['league']
+        entry['closed'] = entry['closed'] and bool(m.get('closed'))
         timestamp = int(m['start'] or 0)
         if timestamp and (not entry['start'] or timestamp < entry['start']):
             entry['start'] = timestamp
