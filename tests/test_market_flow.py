@@ -41,6 +41,18 @@ class MarketFlowMathTests(unittest.TestCase):
         entries = [(now - ix, "Team B", "whale", 3000, 0.5) for ix in range(3)]
         self.assertEqual(assess_market_flow(entries, ["Team A", "Team B"], now), [])
 
+    def test_exceptional_multiplayer_flow_is_urgent(self):
+        now = 1800000000
+        last = [(now - 40 + ix, "Team B", f"w-{ix}", 2200, 0.5) for ix in range(5)]
+        last.append((now - 30, "Team A", "opponent", 600, .5))
+        earlier = [(now - 3600, "Team A", "old1", 500, .5),
+                   (now - 3700, "Team B", "old2", 500, .5)]
+        matched = assess_market_flow(last + earlier, ["Team A", "Team B"], now)
+        self.assertEqual(len(matched), 1)
+        self.assertTrue(matched[0]["urgent"])
+        self.assertGreaterEqual(matched[0]["wallets"], 4)
+        self.assertGreater(matched[0]["burst_ratio"], 5)
+
     def test_no_synthetic_burst_without_sufficient_history(self):
         now = 1800000000
         found = assess_market_flow(flow_rows(now), ["Team A", "Team B"], now)
@@ -131,6 +143,25 @@ class MarketFlowStorageTests(unittest.TestCase):
         self.assertIn("2,700 USD", message)
         self.assertNotIn("6,200 USD", message)
         self.assertIn("Map 2 Winner", message)
+
+    def test_high_market_flow_generates_one_urgent_alert(self):
+        now = int(time.time())
+        for ix in range(5):
+            self.db.add_trade(tx(COND1, f"wallet-{ix}", 2200, now - 100 + ix, f"big-{ix}"))
+        self.db.add_trade(tx(COND1, "counterpart", 600, now - 80, "small", "Team A"))
+        self.db.add_trade(tx(COND1, "old", 700, now - 3600, "old", "Team A"))
+        self.radar.flow_conditions.add(COND1)
+        self.radar.market_flow_alerts(now)
+        pending = self.db.pending_alerts()
+        self.assertEqual(len(pending), 1)
+        self.assertTrue(pending[0][0].startswith("market-flow:"))
+        self.radar.flush_outbox()
+        self.assertIn("NAGŁE PRZECHYLENIE", self.client.messages[0])
+        self.assertIn("Map 2 Winner", self.client.messages[0])
+        self.assertIn("wallet", self.client.messages[0].lower())
+        self.radar.flow_conditions.add(COND1)
+        self.radar.market_flow_alerts(now + 10)
+        self.assertEqual(self.db.pending_alerts(), [])
 
     def test_market_flow_alerts_once_per_touched_market(self):
         now = int(time.time())
