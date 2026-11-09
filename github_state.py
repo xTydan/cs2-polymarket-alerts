@@ -84,6 +84,9 @@ def restore():
                 hltv_name = next((n for n in names if Path(n).name == 'hltv_results_cache.json'), None)
                 if hltv_name:
                     (ROOT / 'hltv_results_cache.json').write_bytes(z.read(hltv_name))
+                hltv_matches_name = next((n for n in names if Path(n).name == 'hltv_matches_cache.json'), None)
+                if hltv_matches_name:
+                    (ROOT / 'hltv_matches_cache.json').write_bytes(z.read(hltv_matches_name))
                 found = True
                 print(f'Odtworzono stan z {a.get("created_at")} (artefakt {a["id"]}).')
                 break
@@ -119,6 +122,9 @@ def backup():
     hltv_cache = ROOT / 'hltv_results_cache.json'
     if hltv_cache.exists():
         shutil.copy2(hltv_cache, STATE / 'hltv_results_cache.json')
+    matches_cache = ROOT / 'hltv_matches_cache.json'
+    if matches_cache.exists():
+        shutil.copy2(matches_cache, STATE / 'hltv_matches_cache.json')
     print('Stan zapakowany; token Telegram nigdy nie jest zapisywany.')
 
 
