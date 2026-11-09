@@ -344,7 +344,11 @@ function eventStatus(e){
   if(e.hltv?.status==='finished'||e.closed)return 'archive';
   if(!e.start)return 'undated';
   if(e.start>now)return 'upcoming';
-  return now-e.start<=8*3600?'started':'archive';
+  // Conservative backup when HLTV cannot confirm the end of a match.
+  // Do not keep old BO3 matches in the active list for eight hours.
+  const type=String(e.title||'').match(/\bBO([135])\b/i);
+  const maxHours=type?.[1]==='1'?2.5:type?.[1]==='5'?7:4.5;
+  return now-e.start<=maxHours*3600?'started':'archive';
 }
 function getRegion(e){const text=(leagueName(e)+' '+e.title).toLowerCase();
  if(/south america|latam|brazil|brazyl|argentin/.test(text))return 'Ameryka Płd.';
@@ -560,7 +564,7 @@ def build_page(data: dict) -> str:
 <select id="sort" aria-label="Sortowanie"><option value="newest" selected>Sortuj: najnowsze</option><option value="largest">Sortuj: największe kwoty</option><option value="odds">Sortuj: najwyższe kursy</option><option value="pressure">Sortuj mecze: przechylenie</option></select>
 <button id="export" type="button">↓ Eksport CSV</button></div>
 <main id="main" aria-live="polite"></main>
-<footer><p>Ostatni pełny skan: <b id="scan"></b> · Wygenerowano: <b id="stamp"></b> (czas polski). Odśwież stronę, aby zobaczyć najnowszy opublikowany raport.</p><p>Godziny spotkań są planowanymi terminami z Gamma API (gameStartTime / startTime), wyświetlanymi w strefie Europe/Warsaw, jeśli dostępne. Nigdy nie używamy daty wystawienia rynku jako godziny meczu. „Po starcie” nie potwierdza gry LIVE. „Koniec” oznacza wynik dopasowany z HLTV, zaś „Archiwum” może również wynikać z zamknięcia rynku lub upływu czasu. Porównanie stron rynku opiera się wyłącznie na zarejestrowanych BUY: obie strony mogą nie mieć równych danych. Podział na niższe tiery jest heurystyczny. Transakcje bez pełnych metadanych mogą znajdować się w osobnej grupie „Nieznany mecz”.</p><p>Przechylenie opisuje wyłącznie zaobserwowane zakupy, nie łączny obrót, prawdopodobieństwo wyniku ani podejrzenie manipulacji. Panel jest publiczny w GitHub Pages. Nie publikuje tokenu Telegram ani sekretów GitHuba.</p></footer></div>
+<footer><p>Ostatni pełny skan: <b id="scan"></b> · Wygenerowano: <b id="stamp"></b> (czas polski). Odśwież stronę, aby zobaczyć najnowszy opublikowany raport.</p><p>Godziny spotkań są planowanymi terminami z Gamma API (gameStartTime / startTime), wyświetlanymi w strefie Europe/Warsaw, jeśli dostępne. Nigdy nie używamy daty wystawienia rynku jako godziny meczu. „Po starcie” nie potwierdza gry LIVE. „Koniec” oznacza wynik dopasowany z HLTV. Gdy brak potwierdzenia HLTV, niektóre mecze trafiają do archiwum na podstawie czasu (BO1 po 2,5 h, BO3 po 4,5 h, BO5 po 7 h) — to ostrożna heurystyka, nie oficjalny wynik. Porównanie stron rynku opiera się wyłącznie na zarejestrowanych BUY: obie strony mogą nie mieć równych danych. Podział na niższe tiery jest heurystyczny. Transakcje bez pełnych metadanych mogą znajdować się w osobnej grupie „Nieznany mecz”.</p><p>Przechylenie opisuje wyłącznie zaobserwowane zakupy, nie łączny obrót, prawdopodobieństwo wyniku ani podejrzenie manipulacji. Panel jest publiczny w GitHub Pages. Nie publikuje tokenu Telegram ani sekretów GitHuba.</p></footer></div>
 <script>window.__RADAR_DATA__=''' + raw + ''';</script>''' + SCRIPT + '''</body></html>'''
     return html
 

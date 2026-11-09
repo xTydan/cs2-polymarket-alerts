@@ -20,6 +20,20 @@ class HLTVResultsTests(unittest.TestCase):
         self.assertEqual(records[0]["teams"], ["team a", "team b"])
         self.assertEqual(records[0]["score"], [2, 1])
 
+    def test_real_hltv_table_structure_without_dash(self):
+        html = ('<div class="result-con" data-zonedgrouping-entry-unix="1794222000000">'
+                '<a class="a-reset" href="/matches/123/team-a-vs-team-b">'
+                '<table><tr>'
+                '<td class="team-cell"><div class="team">Team A</div></td>'
+                '<td class="result-score"><span class="score-won">2</span>'
+                '<span class="score-lost">1</span></td>'
+                '<td class="team-cell"><div class="team">Team B</div></td>'
+                '</tr></table></a></div>')
+        records = parse_results(html)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["score"], [2, 1])
+        self.assertEqual(records[0]["teams"], ["team a", "team b"])
+
     def test_match_result_reverse_teams(self):
         results = [{"teams": ["team b", "team a"], "score": [2, 1],
                     "timestamp": 1800000000, "url": "https://www.hltv.org/matches/1/test"}]
