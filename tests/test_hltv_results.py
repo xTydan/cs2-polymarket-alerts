@@ -51,6 +51,18 @@ class HLTVResultsTests(unittest.TestCase):
         self.assertEqual(matches[0]["score"], [2, 0])
         self.assertTrue(matches[0]["url"].endswith("/matches/321/alpha-vs-beta"))
 
+    def test_stylized_underw0rld_alias_in_result_matching(self):
+        self.assertEqual(norm("underw0rld"), norm("underworld"))
+        start = 1800000000
+        event = [{"key": "bestia-underw0rld",
+                  "title": "Counter-Strike: BESTIA Academy vs underw0rld (BO3) - CCT South America",
+                  "start": start}]
+        rows = [{"teams": ["bestia academy", "underworld"], "score": [2, 1],
+                 "timestamp": start + 1200,
+                 "url": "https://www.hltv.org/matches/2400097/bestia-academy-vs-underworld"}]
+        self.assertEqual(match_results(event, rows, now=start + 1500)
+                         ["bestia-underw0rld"]["score"], [2, 1])
+
     def test_match_result_reverse_teams(self):
         results = [{"teams": ["team b", "team a"], "score": [2, 1],
                     "timestamp": 1800000000, "url": "https://www.hltv.org/matches/1/test"}]
