@@ -67,6 +67,8 @@ class RadarTests(unittest.TestCase):
         self.addCleanup(self.db.conn.close)
         self.cfg = DEFAULT.copy()
         self.cfg["wallet_history_check"] = False
+        # These alert tests must not depend on 21:00 local-time daily report.
+        self.cfg["daily_summary_enabled"] = False
         self.cfg["multi_wallet_cluster_usd"] = 900
         # Testy natychmiastowych alertów: w produkcji progi pozostają bez zmian.
         # W teście ustawiamy kwoty tak, aby odróżnić PILNE od zbiorczych.
