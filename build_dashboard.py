@@ -124,14 +124,19 @@ def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000,
     hltv_events = {}
     for m in view_markets:
         key = str(m['s'] or (m['m'] if not m['m'].startswith('Nieznany mecz') else m['c'])).lower()
-        entry = hltv_events.setdefault(key, {'key': key, 'title': m['m'], 'start': 0})
+        entry = hltv_events.setdefault(key, {'key': key, 'title': m['m'],
+                                           'league': m.get('league') or '', 'start': 0,
+                                           'closed': True})
+        if not entry['league'] and m.get('league'):
+            entry['league'] = m['league']
+        entry['closed'] = entry['closed'] and bool(m.get('closed'))
         timestamp = int(m['start'] or 0)
         if timestamp and (not entry['start'] or timestamp < entry['start']):
             entry['start'] = timestamp
     hltv_cache = hltv_cache_path or ROOT / 'hltv_results_cache.json'
     match_cache = hltv_matches_cache_path or ROOT / 'hltv_matches_cache.json'
     current_matches = refresh_matches(match_cache, list(hltv_events.values()))
-    hltv_results = {**current_matches, **refresh_hltv(hltv_cache, list(hltv_events.values()))}
+    hltv_results = {**current_matches, **refresh_hltv(hltv_cache, list(hltv_events.values()), current_matches)}
     return {
         'hltvResults': hltv_results,
         'generated':datetime.now(timezone.utc).isoformat(timespec='seconds'),
@@ -180,7 +185,7 @@ a{color:#90d5ff}button,input,select{font:inherit}button{cursor:pointer}button:fo
 .fixture-day{padding:8px 14px;background:#192941;border-top:1px solid #2d4057;color:#bed0e8;font-size:11px;font-weight:750;text-transform:capitalize;letter-spacing:.025em}
 .fixture-day:first-child{border-top:0}.fixture-row{display:grid;grid-template-columns:85px minmax(135px,1.3fr) minmax(130px,1.2fr) minmax(172px,1.1fr) minmax(110px,.72fr) 84px 17px;align-items:center;column-gap:12px;padding:13px 14px;width:100%;text-align:left;background:transparent;border:0;border-top:1px solid #263851;color:var(--fg)}
 .fixture-row:hover{background:#1c324c}.fixture-time{font-size:11px;color:#c4d8ed;text-align:center;padding-right:13px;border-right:1px solid #354862}.fixture-clock{font-size:15px;font-weight:750;font-variant-numeric:tabular-nums}
-.fixture-when{font-size:9px;line-height:1.1;font-weight:800;letter-spacing:.04em;margin-top:4px;color:#97abc5}.fixture-when.started{color:#eac382}.fixture-when.upcoming{color:#78e4bc}.fixture-when.live{color:#ff798f}
+.fixture-when{font-size:9px;line-height:1.1;font-weight:800;letter-spacing:.04em;margin-top:4px;color:#97abc5}.fixture-when.started{color:#eac382}.fixture-when.upcoming{color:#78e4bc}.fixture-when.live{color:#ff798f}.fixture-when.possible{color:#f0c27c}
 .fixture-result{color:#8bd7bb;font-weight:750;font-size:12px;margin-top:5px}.fixture-teams{min-width:0}.fixture-team{font-weight:680;line-height:1.45;overflow-wrap:anywhere}.fixture-meta{min-width:0}.fixture-league{color:#b8cae1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 .fixture-tags{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:5px}.tiny-label{font-size:10px;color:#c4d3e7;border:1px solid #3c506d;padding:2px 6px;border-radius:4px}
 .fixture-sides{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:0}.side-stack{min-width:0}.side-caption{display:block;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.side-value{font-size:12px;font-weight:730;color:#96e8cf;white-space:nowrap}
@@ -353,17 +358,19 @@ function leagueName(e){
 }
 function eventStatus(e){
   const now=Date.now()/1000;
-  if(e.hltv?.status==='finished'||e.hltv?.status==='archive')return 'archive';
-  if(e.hltv?.status==='live' && e.hltv.observedAt && now-e.hltv.observedAt<1200)return 'live';
-  if(e.hltv?.status==='upcoming' && e.hltv.observedAt && now-e.hltv.observedAt<1200)return 'upcoming';
+  if(e.hltv?.status==='finished')return 'archive';
+  const fresh=e.hltv?.observedAt && now-e.hltv.observedAt<1200;
+  if(fresh && e.hltv.status==='live')
+    return e.hltv.confidence==='probable'?'possible':'live';
+  // HLTV /matches can still list a match as upcoming after its planned
+  // kickoff. Never call it LIVE merely because the clock passed.
+  if(fresh && e.hltv.status==='upcoming')return 'upcoming';
   if(e.closed)return 'archive';
   if(!e.start)return 'undated';
   if(e.start>now)return 'upcoming';
-  // Conservative backup when HLTV cannot confirm the end of a match.
-  // Do not keep old BO3 matches in the active list for eight hours.
-  const type=String(e.title||'').match(/\bBO([135])\b/i);
-  const maxHours=type?.[1]==='1'?2.5:type?.[1]==='5'?7:4.5;
-  return now-e.start<=maxHours*3600?'started':'archive';
+  // Allow long event/stream delays. Only verified HLTV /results confirms
+  // completion; after two days, move the *unverified* fixture to archive.
+  return now-e.start<=48*3600?'started':'archive';
 }
 function getRegion(e){const text=(leagueName(e)+' '+e.title).toLowerCase();
  if(/south america|latam|brazil|brazyl|argentin/.test(text))return 'Ameryka Płd.';
@@ -382,12 +389,12 @@ for(const e of allEvents.values()){
  e.teams=parsedTeams(e.title);
  e.region=getRegion(e);
   e.hltv=hltvResults[e.key]||null;
-  if(e.hltv && ['live','upcoming'].includes(e.hltv.status) && e.hltv.start>0
-    && (!e.start || Math.abs(e.hltv.start-e.start)<18*3600))e.start=e.hltv.start;
+  if(e.hltv && ['live','upcoming'].includes(e.hltv.status) && e.hltv.start>0)
+    e.start=e.hltv.start;
 }
 let stageChoice='active',leagueChoice='all',regionChoice='all',onlyWithTrades=false,minPMVolume=100;
 // HLTV-verified sections start open. Unverified and historical sections are collapsed.
-const sectionOpen=new Map([['live',true],['upcoming',true],['started',false],['undated',false],['archive',false]]);
+const sectionOpen=new Map([['live',true],['possible',true],['upcoming',true],['started',false],['undated',false],['archive',false]]);
 function fixtureRow(x){
  const {e,rr}=x, m=pickMarket(e,rr),main=rr.filter(r=>r.c===m?.c),side=getSides(m,main);
  const sideA=side.find(s=>s.o.toLowerCase()===e.teams[0].toLowerCase())||side[0];
@@ -397,8 +404,9 @@ function fixtureRow(x){
  const stage=eventStatus(e);
  const when=e.start?timeFmt.format(e.start*1000):'—:—';
  t.append(mk('div','fixture-clock',when));
- t.title=e.start?'Planowane rozpoczęcie: '+dt(e.start)+' (czas polski)'+(e.hltv&&['live','upcoming'].includes(e.hltv.status)?' · HLTV':' · Polymarket'):'Brak godziny rozpoczęcia';
- const statusLabel=stage==='live'?'LIVE':stage==='archive'&&e.hltv?.status==='finished'?'KONIEC':stage==='started'?'PO STARCIE':stage==='upcoming'?'PLAN':stage==='archive'?'ARCHIWUM':'BEZ GODZ.';
+ t.title=e.start?'Godzina planowana: '+dt(e.start)+' (czas polski)'+(e.hltv?.start?' · HLTV':' · Polymarket')+'; rzeczywisty start może się przesunąć':'Brak godziny rozpoczęcia';
+ const overdue=stage==='upcoming'&&e.start>0&&Date.now()/1000-e.start>15*60;
+  const statusLabel=stage==='live'?'LIVE':stage==='possible'?'LIVE?':stage==='archive'&&e.hltv?.status==='finished'?'KONIEC':stage==='started'?'PO PLANIE':stage==='upcoming'?(e.hltv?.confidence==='probable'?'PLAN?':overdue?'PO PLANIE':'PLAN'):stage==='archive'?'ARCHIWUM':'BEZ GODZ.';
   t.append(mk('div','fixture-when '+stage,statusLabel));
  const teams=mk('div','fixture-teams');
  const a=mk('div','fixture-team',e.teams[0]||e.title),b=mk('div','fixture-team',e.teams[1]||'Drugi zespół nieustalony');
@@ -443,7 +451,7 @@ function showMatches(rows){
  // Pasek narzedzi: statusy + liga + region; bez wplywu na inne zakladki.
  const panel=mk('div','fixture-layout');const sidebar=mk('aside','fixture-sidebar');
  sidebar.append(mk('div','side-heading','FILTRY MECZÓW'));
- const choices=[['active','Aktualne'],['live','LIVE (HLTV)'],['upcoming','Nadchodzące'],['started','Po starcie*'],['archive','Archiwum'],['undated','Bez terminu'],['all','Wszystkie']];
+ const choices=[['active','Aktualne'],['live','LIVE (HLTV)'],['possible','Możliwe LIVE'],['upcoming','Nadchodzące'],['started','Po godzinie*'],['archive','Archiwum'],['undated','Bez terminu'],['all','Wszystkie']];
  for(const [key,label] of choices){const btn=mk('button','fixture-stage'+(stageChoice===key?' active':''),label);btn.type='button';
   btn.onclick=()=>{stageChoice=key;if(sectionOpen.has(key))sectionOpen.set(key,true);displayLimit=160;render()};sidebar.append(btn)}
  const toggle=mk('label','fixture-check');const cb=mk('input');cb.type='checkbox';cb.checked=onlyWithTrades;cb.onchange=()=>{onlyWithTrades=cb.checked;render()};toggle.append(cb,mk('span','','Tylko mecze z zakupami'));sidebar.append(toggle);
@@ -457,18 +465,18 @@ function showMatches(rows){
  for(const lg of ligues){const op=mk('option','',lg);op.value=lg;select.append(op)}select.value=leagueChoice;select.onchange=()=>{leagueChoice=select.value;render()};sidebar.append(select);
  sidebar.append(mk('div','side-heading gap-above','REGION (Z NAZWY)'));
  const reg=mk('select','fixture-select');for(const lg of ['all','Europa','Ameryka Płd.','Ameryka Płn.','Azja / Oceania','Nieustalony']){const op=mk('option','',lg==='all'?'Wszystkie regiony':lg);op.value=lg;reg.append(op)}reg.value=regionChoice;reg.onchange=()=>{regionChoice=reg.value;render()};sidebar.append(reg);
- sidebar.append(mk('p','fixture-aside-note','Status LIVE i dostępne terminy są sprawdzane na HLTV /matches. „Po starcie” oznacza jedynie upływ godziny z Polymarket bez potwierdzenia LIVE.'));
+ sidebar.append(mk('p','fixture-aside-note','HLTV /matches jest źródłem LIVE i terminarza. „LIVE?” oznacza dopasowanie prawdopodobne; „Po godzinie” nie potwierdza rozpoczęcia. Opóźnienia i przesunięcia startu są możliwe.'));
  const content=mk('section','fixture-content');const top=mk('div','fixture-main-head');top.append(child(mk('div'),mk('h2','','Mecze Counter-Strike 2'),mk('div','small muted',`${matches.length} spotkań • obrót PM ≥ ${money(minPMVolume)} (gdy znany) • godziny PL`)));
  const meta=mk('span','fixture-count',`${matches.filter(x=>x.rr.length).length} z zakupami`);top.append(meta);content.append(top);
  const missing=[...allEvents.values()].filter(e=>e.title.startsWith('Nieznany mecz')&&e.rows.length).length;
  if(missing)content.append(mk('p','small muted fixture-legacy',`Starsze wpisy bez nazw spotkań (${missing} rynków) znajdziesz w zakładce Transakcje.`));
  const pressure=pressureList().filter(x=>eventStatus(x.e)!=='archive').slice(0,4);if(pressure.length){const box=mk('div','flow-teaser');const h=mk('div','flow-teaser-title');h.append(mk('strong','','↗ Największe przechylenia zakupów ('+pressureMinutes+' min)'));const jump=mk('button','show-all','Pełny ranking →');jump.onclick=()=>{tab='pressure';render()};h.append(jump);box.append(h);const items=mk('div','flow-teaser-grid');for(const x of pressure)items.append(pressureCard(x,true));box.append(items);content.append(box)}
- const order=['live','started','upcoming','undated','archive'];const title={live:'Mecze na żywo · HLTV',started:'Po planowanym rozpoczęciu (niezweryfikowane)',upcoming:'Nadchodzące mecze',undated:'Mecze bez potwierdzonej godziny',archive:'Archiwum spotkań'};
+ const order=['live','possible','upcoming','started','undated','archive'];const title={live:'Mecze LIVE · potwierdzone HLTV',possible:'Możliwe LIVE · wymagają weryfikacji',upcoming:'Nadchodzące / oczekujące na start',started:'Po planowanej godzinie (niezweryfikowane)',undated:'Mecze bez potwierdzonej godziny',archive:'Archiwum spotkań'};
  const buckets=new Map(order.map(k=>[k,[]]));for(const x of matches)buckets.get(eventStatus(x.e)).push(x);
  for(const [key,group] of buckets){if(!group.length)continue;const mode=$('#sort').value;
  group.sort((a,b)=>{if(mode==='pressure')return (eventPressure(b.e)?.score||0)-(eventPressure(a.e)?.score||0)||b.volume-a.volume;
   if(key==='upcoming')return (a.e.start||0)-(b.e.start||0);
-   if(key==='live')return (a.e.start||0)-(b.e.start||0);
+   if(key==='live'||key==='possible')return (a.e.start||0)-(b.e.start||0);
  if(key==='started')return (b.e.start||0)-(a.e.start||0);
  if(key==='archive')return (b.e.start||b.last)-(a.e.start||a.last);
  return mode==='newest'?b.last-a.last:mode==='odds'?Math.max(0,...b.rr.map(r=>1/r.p))-Math.max(0,...a.rr.map(r=>1/r.p)):b.volume-a.volume});
@@ -502,7 +510,8 @@ function showDetail(rows){const event=allEvents.get(selected);if(!event){closeDe
    if(/^https:\/\/www\.hltv\.org\/matches\//.test(event.hltv.url||''))score.append(document.createTextNode(' · '),aLink('HLTV ↗',event.hltv.url));p.append(score);
   }
   if(event.hltv && ['live','upcoming'].includes(event.hltv.status) && /^https:\/\/www\.hltv\.org\/matches\/\d+\//.test(event.hltv.url||'')){
-   const source=mk('div','subsection small muted','Status: '+(event.hltv.status==='live'?'LIVE':'Nadchodzący')+' · HLTV /matches');
+   const confidence=event.hltv.confidence==='probable'?' (dopasowanie prawdopodobne)':' (dopasowanie potwierdzone)';
+   const source=mk('div','subsection small muted','Status HLTV: '+(event.hltv.status==='live'?'LIVE':'Nadchodzący')+confidence+' · HLTV /matches');
    source.append(document.createTextNode(' · '),aLink('Otwórz w HLTV ↗',event.hltv.url));p.append(source);
   }
   const ctrl=mk('div','detail-controls');ctrl.append(mk('strong','','Rynek:'));

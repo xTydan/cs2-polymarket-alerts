@@ -1,6 +1,6 @@
 import unittest
 
-from hltv_matches import match_schedule, parse_matches, reconcile
+from hltv_matches import match_schedule, parse_matches, reconcile, team_similarity
 
 
 MATCHES_HTML = """
@@ -85,7 +85,80 @@ class HltvMatchesTests(unittest.TestCase):
 
     def test_do_not_archive_unmatched_upcoming(self):
         previous = {"a": {"status": "upcoming", "source": "hltv-matches", "observedAt": 100}}
-        self.assertEqual(reconcile(previous, {}, [{"key": "a"}], 1000), {})
+        once = reconcile(previous, {}, [{"key": "a"}], 1000)
+        self.assertEqual(once["a"]["status"], "upcoming")
+        later = reconcile(once, {}, [{"key": "a"}], 1950)
+        self.assertEqual(later["a"]["status"], "uncertain")
+        self.assertFalse(later["a"]["confirmed"])
+
+    def test_closed_poly_events_are_not_resurrected(self):
+        now = 1800000000
+        fixture = [{"teams": ["team a", "team b"], "status": "live", "start": 0,
+                    "url": "https://www.hltv.org/matches/1/one"}]
+        closed = [{"key": "old", "title": "Team A vs Team B (BO3)",
+                   "start": now - 100, "closed": True}]
+        self.assertEqual(match_schedule(closed, fixture, now), {})
+
+    def test_delayed_upcoming_remains_upcoming(self):
+        now = 1800000000
+        # The original Polymarket time is more than a day earlier.
+        fixtures = [{"teams": ["team a", "team b"], "status": "upcoming",
+                     "start": now + 3600, "url": "https://www.hltv.org/matches/101/delayed"}]
+        events = [{"key": "event", "title": "Team A vs Team B (BO3)",
+                   "start": now - 28 * 3600}]
+        result = match_schedule(events, fixtures, now)
+        self.assertEqual(result["event"]["status"], "upcoming")
+        self.assertEqual(result["event"]["confidence"], "probable")
+        self.assertEqual(result["event"]["start"], now + 3600)
+
+    def test_live_without_kickoff_after_long_delay(self):
+        now = 1800000000
+        fixtures = [{"teams": ["team a", "team b"], "status": "live",
+                     "start": 0, "url": "https://www.hltv.org/matches/101/live"}]
+        events = [{"key": "event", "title": "Team A vs Team B (BO3)",
+                   "start": now - 20 * 3600}]
+        found = match_schedule(events, fixtures, now)
+        self.assertEqual(found["event"]["status"], "live")
+        self.assertEqual(found["event"]["confidence"], "confirmed")
+
+    def test_team_spelling_variants_are_probable_only(self):
+        now = 1800000000
+        fixture = [{"teams": ["omega squad", "falcons"], "status": "live",
+                    "start": 0, "url": "https://www.hltv.org/matches/10/test"}]
+        event = [{"key": "a", "title": "Omega Squaad vs Falcons (BO3)",
+                  "start": now - 600}]
+        found = match_schedule(event, fixture, now)
+        self.assertEqual(found["a"]["confidence"], "probable")
+        self.assertGreater(team_similarity("omega squaad", "omega squad"), .9)
+        self.assertEqual(team_similarity("omega academy", "omega"), 0)
+
+    def test_two_poly_events_competing_for_same_hltv_match_remain_unmatched(self):
+        now = 1800000000
+        fixture = [{"teams": ["team a", "team b"], "status": "live",
+                    "start": 0, "url": "https://www.hltv.org/matches/10/live"}]
+        events = [{"key": "a", "title": "Team A vs Team B (BO3)", "start": now - 800},
+                  {"key": "b", "title": "Team A vs Team B (BO3)", "start": now - 800}]
+        self.assertEqual(match_schedule(events, fixture, now), {})
+
+    def test_rematch_uses_kickoff_date_not_just_same_teams(self):
+        now = 1800000000
+        fixtures = [{"teams": ["team a", "team b"], "status": "upcoming",
+                     "start": now + 60, "url": "https://www.hltv.org/matches/10/one"},
+                    {"teams": ["team a", "team b"], "status": "upcoming",
+                     "start": now + 36 * 3600, "url": "https://www.hltv.org/matches/11/two"}]
+        events = [{"key": "a", "title": "Team A vs Team B (BO3)", "start": now + 60},
+                  {"key": "b", "title": "Team A vs Team B (BO3)", "start": now + 36 * 3600}]
+        found = match_schedule(events, fixtures, now)
+        self.assertEqual(len(found), 2)
+        self.assertEqual(found["a"]["url"], fixtures[0]["url"])
+        self.assertEqual(found["b"]["url"], fixtures[1]["url"])
+
+    def test_unknown_polymarket_time_only_probable(self):
+        now = 1800000000
+        fixtures = [{"teams": ["team a", "team b"], "status": "upcoming",
+                     "start": now + 60, "url": "https://www.hltv.org/matches/10/one"}]
+        found = match_schedule([{"key": "a", "title": "Team A vs Team B", "start": 0}], fixtures, now)
+        self.assertEqual(found["a"]["confidence"], "probable")
 
     def test_archive_only_previously_seen_live_after_grace(self):
         events = [{"key": "a"}]
@@ -94,8 +167,8 @@ class HltvMatchesTests(unittest.TestCase):
         self.assertEqual(once["a"]["status"], "live")
         self.assertEqual(once["a"]["missingSince"], 1000)
         later = reconcile(once, {}, events, 1950)
-        self.assertEqual(later["a"]["status"], "archive")
-        self.assertEqual(later["a"]["source"], "hltv-live-ended")
+        self.assertEqual(later["a"]["status"], "uncertain")
+        self.assertEqual(later["a"]["source"], "hltv-not-found")
         self.assertFalse(later["a"]["confirmed"])
 
     def test_ambiguous_pair_is_not_matched(self):

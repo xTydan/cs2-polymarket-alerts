@@ -139,35 +139,57 @@ def parse_results(html: str) -> list[dict]:
     return output
 
 
-def match_results(events: list[dict], results: list[dict], now: int | None = None) -> dict:
-    now = now or int(time.time())
-    found = {}
+def match_results(events: list[dict], results: list[dict],
+                  now: int | None = None, linked_matches: dict | None = None) -> dict:
+    """Close the exact HLTV fixture, even if its actual kickoff was delayed.
+
+    Prefer a previously associated HLTV match URL (strong identity),
+    otherwise fall back to conservative exact team-pair + scheduled time.
+    Never assign one finished fixture to two Polymarket events.
+    """
+    now = int(time.time()) if now is None else now
+    linked_matches = linked_matches or {}
+    proposals: dict[str, list[tuple[int, dict, tuple[str, str]]]] = {}
     for event in events:
         event_id = str(event.get("key") or "")
         pair = teams_from_title(event.get("title", ""))
+        if not event_id or not pair:
+            continue
+        linked_url = str(linked_matches.get(event_id, {}).get("url") or "")
         start = int(event.get("start") or 0)
-        if not event_id or not pair or not start or start > now + 300:
-            continue
-        candidates = []
+        options = []
         for result in results:
-            if set(pair) != set(result["teams"]) or not result["timestamp"]:
+            if set(pair) != set(result["teams"]) or not result.get("timestamp"):
                 continue
-            delta = abs(result["timestamp"] - start)
-            if delta > MATCH_TOLERANCE_SECONDS or result["timestamp"] > now + 300:
+            if result["timestamp"] > now + 300:
                 continue
-            candidates.append((delta, result))
-        candidates.sort(key=lambda item: item[0])
-        # If two results for the same teams are near the planned start,
-        # do not guess which match is the Polymarket event.
-        if len(candidates) != 1:
+            same_url = linked_url and linked_url == result["url"]
+            if same_url:
+                options.append((2, result, pair))
+            elif start and start <= now + 300:
+                delta = result["timestamp"] - start
+                if -6 * 3600 <= delta <= MATCH_TOLERANCE_SECONDS:
+                    options.append((1, result, pair))
+        if len(options) != 1:
             continue
-        result = candidates[0][1]
+        proposals[event_id] = options
+    by_url: dict[str, list[tuple[str, tuple[int, dict, tuple[str, str]]]]] = {}
+    for key, options in proposals.items():
+        item = options[0]
+        by_url.setdefault(item[1]["url"], []).append((key, item))
+    found = {}
+    for contenders in by_url.values():
+        contenders.sort(key=lambda x: (-x[1][0], x[0]))
+        if len(contenders) > 1 and contenders[0][1][0] == contenders[1][1][0]:
+            continue
+        event_id, (_strength, result, pair) = contenders[0]
         score = result["score"] if pair == tuple(result["teams"]) else result["score"][::-1]
-        found[event_id] = {"status": "finished", "score": score, "url": result["url"], "confirmed": now}
+        found[event_id] = {"status": "finished", "score": score, "url": result["url"],
+                           "confirmed": now}
     return found
 
 
-def refresh(cache_path: Path, events: list[dict]) -> dict:
+def refresh(cache_path: Path, events: list[dict], linked_matches: dict | None = None) -> dict:
     now = int(time.time())
     try:
         old = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
@@ -187,7 +209,7 @@ def refresh(cache_path: Path, events: list[dict]) -> dict:
         }, timeout=12)
         response.raise_for_status()
         results = parse_results(response.text)
-        new = match_results(events, results, now)
+        new = match_results(events, results, now, linked_matches)
         old.update(new)
         if not results:
             # A 200 response can still be a Cloudflare challenge or changed markup.
