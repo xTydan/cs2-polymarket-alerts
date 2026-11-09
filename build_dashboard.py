@@ -153,6 +153,9 @@ a{color:#90d5ff}button,input,select{font:inherit}button{cursor:pointer}button:fo
 .range-group{display:flex;gap:6px;align-items:center;border:1px solid #35516f;border-radius:11px;padding:6px 9px;flex:1 1 300px;flex-wrap:wrap;background:#0d1a2a;min-width:275px}.range-heading{font-size:10px;font-weight:800;letter-spacing:.06em;color:#a4bfdc;margin-right:6px;white-space:nowrap}.range-field{display:flex;align-items:center;gap:6px;flex:1 1 90px;min-width:80px}.range-field span{font-size:11px;color:#a8bbd1}.toolbar .range-field input{padding:7px 9px;width:100%;min-width:0;height:35px;background:#162943;font-variant-numeric:tabular-nums}.toolbar #reset-bounds{font-size:12px;min-height:43px}.pressure-controls .pressure-field{display:flex;gap:5px;align-items:center}.pressure-controls .pressure-field input{background:#102035;border:1px solid #435976;color:#edf4ff;border-radius:8px;padding:8px 9px;width:110px;min-height:35px;font-variant-numeric:tabular-nums}
 @media(max-width:670px){.range-group{flex-basis:100%;min-width:0}.range-heading{flex-basis:100%;margin-bottom:2px}.pressure-controls .pressure-field{flex:1 1 145px;flex-wrap:wrap}.pressure-controls .pressure-field input{width:100%}}
 .panel{background:rgba(18,29,47,.94);border:1px solid var(--edge);border-radius:16px;overflow:hidden}.panel-title{padding:16px 18px;border-bottom:1px solid var(--edge);display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}.panel-title h2{font-size:17px;margin:0}.count{font-size:12px;color:var(--dim)}.matches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.match-card{padding:17px;background:rgba(19,32,52,.96);border:1px solid var(--edge);border-radius:15px;text-align:left;color:var(--fg);transition:background .12s,border-color .12s}.match-card:hover{background:#192e46;border-color:#487ba0}.card-head{display:flex;gap:14px;justify-content:space-between;align-items:flex-start}.match-title{font-size:15px;font-weight:700;line-height:1.4}.kicker{color:var(--dim);font-size:11px;margin-top:5px}.pill{display:inline-block;font-size:11px;border-radius:99px;border:1px solid #5e6d7e;padding:3px 8px;white-space:nowrap}.pill.lower{border-color:#80633e;color:#f5d09c;background:#34271a}.pill.unknown{color:#c5d4e6}.pill.major{color:#bddbff;border-color:#476b9d}.card-total{font-size:19px;font-weight:730;white-space:nowrap}.side-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;margin-top:11px}.teamname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.money{font-variant-numeric:tabular-nums;font-weight:700;color:#94ebca}.bar{background:#2b3d51;border-radius:99px;height:7px;overflow:hidden;margin-top:6px}.bar>span{display:block;background:linear-gradient(90deg,#4d8ad1,#70cadd);height:100%}.bar.alt>span{background:linear-gradient(90deg,#bb8ac9,#e1b9d4)}.card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:14px;color:var(--dim);font-size:12px}
+.market-activity-note{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;padding:11px 18px;color:#c7d9ec;font-size:12px;border-bottom:1px solid var(--edge);background:#102237}
+.market-activity-note strong{flex-basis:100%;font-size:13px;color:#edf6ff}
+.market-activity-empty{color:#e4c18a;flex-basis:100%}
 .detail{margin-bottom:17px}.detail-head{padding:18px 20px;border-bottom:1px solid var(--edge);display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}.detail-head h2{margin:6px 0 2px;font-size:21px}.detail-meta{font-size:12px;color:var(--dim)}.detail-controls{padding:13px 18px;border-bottom:1px solid var(--edge);display:flex;gap:12px;align-items:center;flex-wrap:wrap}.detail-controls select{max-width:100%;flex:1;background:#0e192a;color:var(--fg);border:1px solid #3b516e;border-radius:9px;padding:9px;min-width:160px}.sides{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px}.sidebox{background:#102338;border:1px solid #35506d;border-radius:12px;padding:16px;min-width:0}.sidebox.alt{background:#261c32;border-color:#655077}.sidebox h3{font-size:17px;margin:0 0 10px;overflow-wrap:anywhere}.sidebox .large{font-size:30px;font-weight:750;letter-spacing:-.6px}.sidebox .foot{font-size:12px;color:var(--dim);margin-top:6px}.subsection{padding:0 16px 16px}.subsection h3{margin:14px 0 9px;font-size:15px}.details-tables{display:grid;grid-template-columns:1fr 1fr;gap:12px}.table-scroll{overflow:auto;max-width:100%}table{width:100%;border-collapse:collapse;min-width:690px}th,td{padding:11px 13px;border-top:1px solid #26364d;text-align:left}th{font-size:11px;letter-spacing:.035em;text-transform:uppercase;color:#b4c6de;background:#142338;white-space:nowrap}td{max-width:360px;overflow-wrap:anywhere}.table-scroll.compact table{min-width:360px}td .secondary{font-size:11px;color:var(--dim)}.right{text-align:right}.center{text-align:center}tbody tr:hover{background:#1a2d43}.link{color:#8ed4ff;text-decoration:none}.link:hover{text-decoration:underline}.empty{padding:35px 16px;color:var(--dim);text-align:center}.morebox{padding:15px;text-align:center;border-top:1px solid var(--edge)}.back{border:none;background:transparent;color:#8ed4ff;font-size:13px;padding:0;margin-bottom:8px}.sectiongap{margin:14px 0}.tagtext{font-size:11px;color:var(--dim)}footer{color:var(--dim);font-size:12px;margin-top:24px;max-width:1120px}footer p{margin:7px 0}
 @media(max-width:780px){.shell{padding:17px 11px 40px}.brand h1{font-size:20px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi .big{font-size:22px}.matches,.sides,.details-tables{grid-template-columns:1fr}.toolbar select{flex:1 1 120px}.toolbar input[type=search]{flex-basis:100%}.detail-head h2{font-size:18px}.card-head .card-total{font-size:17px}}
 
@@ -168,6 +171,11 @@ a{color:#90d5ff}button,input,select{font:inherit}button{cursor:pointer}button:fo
 .fixture-content{min-width:0}.fixture-main-head{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 6px 17px}
 .fixture-main-head h2{font-size:19px;margin:0 0 4px}.fixture-legacy{padding:0 6px 8px;margin:0}.fixture-count{background:#1a3b53;border:1px solid #355573;border-radius:40px;padding:7px 10px;white-space:nowrap;font-size:12px}
 .fixtures-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0 8px;padding:6px 7px}.fixtures-section-head h3{font-size:15px;margin:0}
+.fixtures-toggle{width:100%;display:flex;align-items:center;gap:10px;justify-content:space-between;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--fg);text-align:left;padding:9px 12px;font-weight:700;cursor:pointer}
+.fixtures-toggle:hover{background:#19324b;border-color:#355573}
+.fixtures-toggle:focus-visible{outline:2px solid #8bd7ff;outline-offset:2px}
+.fixtures-toggle-label{flex:1;font-size:14px}
+.fixtures-chevron{font-size:21px;line-height:1;color:#9bd3f3;width:17px;text-align:center}
 .fixture-list{border-radius:12px;border:1px solid var(--edge);background:#121e30;overflow:hidden;margin-bottom:22px}
 .fixture-day{padding:8px 14px;background:#192941;border-top:1px solid #2d4057;color:#bed0e8;font-size:11px;font-weight:750;text-transform:capitalize;letter-spacing:.025em}
 .fixture-day:first-child{border-top:0}.fixture-row{display:grid;grid-template-columns:85px minmax(135px,1.3fr) minmax(130px,1.2fr) minmax(172px,1.1fr) minmax(110px,.72fr) 84px 17px;align-items:center;column-gap:12px;padding:13px 14px;width:100%;text-align:left;background:transparent;border:0;border-top:1px solid #263851;color:var(--fg)}
@@ -378,6 +386,8 @@ for(const e of allEvents.values()){
     && (!e.start || Math.abs(e.hltv.start-e.start)<18*3600))e.start=e.hltv.start;
 }
 let stageChoice='active',leagueChoice='all',regionChoice='all',onlyWithTrades=false,minPMVolume=100;
+// HLTV-verified sections start open. Unverified and historical sections are collapsed.
+const sectionOpen=new Map([['live',true],['upcoming',true],['started',false],['undated',false],['archive',false]]);
 function fixtureRow(x){
  const {e,rr}=x, m=pickMarket(e,rr),main=rr.filter(r=>r.c===m?.c),side=getSides(m,main);
  const sideA=side.find(s=>s.o.toLowerCase()===e.teams[0].toLowerCase())||side[0];
@@ -435,7 +445,7 @@ function showMatches(rows){
  sidebar.append(mk('div','side-heading','FILTRY MECZÓW'));
  const choices=[['active','Aktualne'],['live','LIVE (HLTV)'],['upcoming','Nadchodzące'],['started','Po starcie*'],['archive','Archiwum'],['undated','Bez terminu'],['all','Wszystkie']];
  for(const [key,label] of choices){const btn=mk('button','fixture-stage'+(stageChoice===key?' active':''),label);btn.type='button';
-  btn.onclick=()=>{stageChoice=key;displayLimit=160;render()};sidebar.append(btn)}
+  btn.onclick=()=>{stageChoice=key;if(sectionOpen.has(key))sectionOpen.set(key,true);displayLimit=160;render()};sidebar.append(btn)}
  const toggle=mk('label','fixture-check');const cb=mk('input');cb.type='checkbox';cb.checked=onlyWithTrades;cb.onchange=()=>{onlyWithTrades=cb.checked;render()};toggle.append(cb,mk('span','','Tylko mecze z zakupami'));sidebar.append(toggle);
  sidebar.append(mk('div','side-heading gap-above','OBRÓT POLYMARKET'));
  const vol=mk('select','fixture-select');for(const [value,label] of [['0','Bez minimum'],['100','Min. 100 USD'],['250','Min. 250 USD'],['500','Min. 500 USD'],['1000','Min. 1 000 USD']]){const op=mk('option','',label);op.value=value;vol.append(op)}
@@ -462,8 +472,17 @@ function showMatches(rows){
  if(key==='started')return (b.e.start||0)-(a.e.start||0);
  if(key==='archive')return (b.e.start||b.last)-(a.e.start||a.last);
  return mode==='newest'?b.last-a.last:mode==='odds'?Math.max(0,...b.rr.map(r=>1/r.p))-Math.max(0,...a.rr.map(r=>1/r.p)):b.volume-a.volume});
- const heading=mk('div','fixtures-section-head');heading.append(mk('h3','',title[key]),mk('span','count',group.length+' spotkań'));content.append(heading);
- let shown=0,lastDay='';const list=mk('div','fixture-list');
+ const heading=mk('div','fixtures-section-head');
+ const expanded=sectionOpen.get(key)!==false;
+ const toggleSection=mk('button','fixtures-toggle');toggleSection.type='button';
+ toggleSection.setAttribute('aria-expanded',String(expanded));
+ toggleSection.setAttribute('aria-controls','fixtures-'+key);
+ toggleSection.append(mk('span','fixtures-toggle-label',title[key]),mk('span','count',group.length+' spotkań'),
+   mk('span','fixtures-chevron',expanded?'⌄':'›'));
+ toggleSection.onclick=()=>{sectionOpen.set(key,!expanded);render()};
+ heading.append(toggleSection);content.append(heading);
+ let shown=0,lastDay='';const list=mk('div','fixture-list');list.id='fixtures-'+key;
+ if(!expanded){list.hidden=true;content.append(list);continue;}
  for(const x of group){if(shown>=displayLimit)break;shown++;
  const day=x.e.start?dateFmt.format(x.e.start*1000):'';if(day&&day!==lastDay){lastDay=day;const h=mk('div','fixture-day',dayFmt.format(x.e.start*1000));list.append(h)}
  list.append(fixtureRow(x))}
@@ -475,7 +494,9 @@ function showMatches(rows){
 }
 function openMatch(key){selected=key;selectedMarket=null;window.location.hash='match='+encodeURIComponent(key);tab='detail';render()}
 function closeDetail(){selected=null;selectedMarket=null;window.location.hash='';tab='matches';render()}
-function showDetail(rows){const event=allEvents.get(selected);if(!event){closeDetail();return}const eRows=rows.filter(r=>eventKey(marketById.get(r.c))===selected);const target=$('#main');target.replaceChildren();const p=mk('div','panel detail');const h=mk('div','detail-head');const left=mk('div');const back=mk('button','back','← Wróć do meczów');back.onclick=closeDetail;left.append(back, mk('h2','',event.title));left.append(mk('div','detail-meta',`${eRows.length} zakupów w filtrze • ${event.markets.length} rynków • niepełna obserwacja ≥ 100 USD`));h.append(left);h.append(aLink('Polymarket ↗',matchUrl(event.slug)));p.append(h);const attention=eventPressure(event);if(attention&&attention.sum>=pressureMinUSD){const note=mk('div','subsection');note.append(mk('h3','','Przechylenie obserwowanych zakupów · '+pressureMinutes+' min'));note.append(pressureCard(attention));p.append(note)}
+function showDetail(rows){const event=allEvents.get(selected);if(!event){closeDetail();return}const eRows=rows.filter(r=>eventKey(marketById.get(r.c))===selected);const target=$('#main');target.replaceChildren();const p=mk('div','panel detail');const h=mk('div','detail-head');const left=mk('div');const back=mk('button','back','← Wróć do meczów');back.onclick=closeDetail;left.append(back, mk('h2','',event.title));left.append(mk('div','detail-meta',`${eRows.length} zakupów w filtrze • ${event.markets.length} rynków • niepełna obserwacja ≥ 100 USD`));h.append(left);h.append(aLink('Polymarket ↗',matchUrl(event.slug)));p.append(h);const attention=eventPressure(event);if(attention&&attention.sum>=pressureMinUSD){const note=mk('div','subsection');note.append(mk('h3','','Przechylenie obserwowanych zakupów · '+pressureMinutes+' min'));note.append(pressureCard(attention));
+ note.append(mk('div','small muted','Ten wskaźnik dotyczy rynku zwycięzcy całego meczu, a nie wybranego poniżej rynku mapy.'));
+ p.append(note)}
  if(event.hltv?.status==='finished'&&Array.isArray(event.hltv.score)){
    const score=mk('div','subsection small muted',`Wynik HLTV: ${event.hltv.score.join(':')} · mecz zakończony`);
    if(/^https:\/\/www\.hltv\.org\/matches\//.test(event.hltv.url||''))score.append(document.createTextNode(' · '),aLink('HLTV ↗',event.hltv.url));p.append(score);
@@ -484,8 +505,31 @@ function showDetail(rows){const event=allEvents.get(selected);if(!event){closeDe
    const source=mk('div','subsection small muted','Status: '+(event.hltv.status==='live'?'LIVE':'Nadchodzący')+' · HLTV /matches');
    source.append(document.createTextNode(' · '),aLink('Otwórz w HLTV ↗',event.hltv.url));p.append(source);
   }
-  const ctrl=mk('div','detail-controls');ctrl.append(mk('strong','','Rynek:'));const sel=mk('select');const best=pickMarket(event,eRows);for(const m of event.markets){const o=mk('option','',m.q||'Rynek bez nazwy');o.value=m.c;sel.append(o)}if(!selectedMarket||!event.markets.some(m=>m.c===selectedMarket))selectedMarket=best?.c||event.markets[0]?.c;sel.value=selectedMarket;sel.onchange=()=>{selectedMarket=sel.value;showDetail(filterRows())};ctrl.append(sel,pill(event.tier));p.append(ctrl);
- const chosen=marketById.get(selectedMarket),rr=eRows.filter(r=>r.c===selectedMarket),sides=getSides(chosen,rr),sum=rr.reduce((a,r)=>a+r.a,0);const s=mk('div','sides');for(let i=0;i<Math.max(2,sides.length);i++){const side=sides[i]||{o:'Druga strona — brak danych',total:0,fills:0,wallets:0};s.append(sideCard(side,sum,i))}p.append(s);
+  const ctrl=mk('div','detail-controls');ctrl.append(mk('strong','','Rynek:'));
+ const sel=mk('select');
+ const marketActivity=event.markets.map(m=>{
+   const filtered=eRows.filter(r=>r.c===m.c);
+   return {m,filtered,amount:filtered.reduce((total,r)=>total+r.a,0)};
+ }).sort((a,b)=>b.amount-a.amount||b.filtered.length-a.filtered.length||(a.m.q||'').localeCompare(b.m.q||'','pl'));
+ const best=pickMarket(event,eRows);
+ const suggested=best && eRows.some(r=>r.c===best.c)?best:marketActivity.find(x=>x.filtered.length)?.m||best;
+ for(const item of marketActivity){
+   const o=mk('option','',`${item.m.q||'Rynek bez nazwy'} · ${item.filtered.length} zakupów · ${money(item.amount)}`);
+   o.value=item.m.c;sel.append(o);
+ }
+ if(!selectedMarket||!event.markets.some(m=>m.c===selectedMarket))selectedMarket=suggested?.c||event.markets[0]?.c;
+ sel.value=selectedMarket;sel.onchange=()=>{selectedMarket=sel.value;showDetail(filterRows())};
+ ctrl.append(sel,pill(event.tier));p.append(ctrl);
+ const chosen=marketById.get(selectedMarket),rr=eRows.filter(r=>r.c===selectedMarket),sides=getSides(chosen,rr),sum=rr.reduce((a,r)=>a+r.a,0);
+ const historical=event.rows.filter(r=>r.c===selectedMarket),historicalSum=historical.reduce((a,r)=>a+r.a,0);
+ const marketInfo=mk('div','market-activity-note');
+ marketInfo.append(mk('strong','',chosen?.q||'Wybrany rynek'));
+ marketInfo.append(mk('span','',`W aktualnych filtrach: ${rr.length} zakupów · ${money(sum)}`));
+ marketInfo.append(mk('span','',`W zapisanej historii radaru: ${historical.length} zakupów · ${money(historicalSum)}`));
+ if(!rr.length)marketInfo.append(mk('span','market-activity-empty',
+   'Brak zakupów spełniających filtry na tym rynku. Nie oznacza to zerowego obrotu na Polymarket; radar śledzi tylko część transakcji od 100 USD.'));
+ p.append(marketInfo);
+ const s=mk('div','sides');for(let i=0;i<Math.max(2,sides.length);i++){const side=sides[i]||{o:'Druga strona — brak danych',total:0,fills:0,wallets:0};s.append(sideCard(side,sum,i))}p.append(s);
  const desc=mk('div','subsection small muted',`Wartości to suma zaobserwowanych zakupów BUY w wybranym rynku i czasie. Nie uwzględniamy sprzedaży, mniejszych zleceń ani brakujących danych API. Zmieniając rynek, możesz przejrzeć także mapy i inne typy zakładów.`);p.append(desc);
  const two=mk('div','subsection');two.append(mk('h3','','Portfele — obie strony rynku'));const box=mk('div','details-tables');for(let i=0;i<Math.min(sides.length,2);i++){const side=sides[i],wallets=new Map();for(const r of rr.filter(r=>r.o===side.o)){const key=r.w||'Brak portfela';let obj=wallets.get(key);if(!obj){obj={w:key,amount:0,fills:0,last:0,n:r.n};wallets.set(key,obj)}obj.amount+=r.a;obj.fills++;obj.last=Math.max(obj.last,r.t)}const v=[...wallets.values()].sort((a,b)=>b.amount-a.amount);const wrap=mk('div','panel'),title=mk('div','panel-title');child(title,mk('strong','',side.o),mk('span','small muted',`${v.length} portfeli`));wrap.append(title);const sc=mk('div','table-scroll compact'),t=mk('table'),thead=mk('thead'),tr=mk('tr');['Portfel','Zakupy','Liczba'].forEach(h=>child(tr,mk('th','',h)));thead.append(tr);t.append(thead);const tb=mk('tbody');for(const x of v.slice(0,25)){const r=mk('tr');td(r,x.w==='Brak portfela'?x.w:aLink(x.n||short(x.w),walletUrl(x.w)));td(r,money(x.amount),'money');td(r,x.fills);tb.append(r)}t.append(tb);sc.append(t);wrap.append(sc);if(!v.length)wrap.append(mk('div','empty','Brak zakupów tej strony w obserwowanych danych.'));box.append(wrap)}two.append(box);p.append(two);
  const trans=mk('div','subsection');trans.append(mk('h3','','Wszystkie zaobserwowane zakupy w tym rynku'));const sc=mk('div','table-scroll'),table=tradeTable(rr,'detail-winner');sc.append(table);trans.append(sc);if(!rr.length)trans.append(mk('div','empty','Brak zakupów w tym rynku dla wybranych filtrów.'));if(rr.length>500)trans.append(mk('div','small muted',`Widocznych 500 z ${rr.length} zapisów. Pozostałe pobierz przez Eksport CSV.`));p.append(trans);
