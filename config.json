@@ -31,5 +31,13 @@
   "diagnostic_trade_logs": true,
   "daily_summary_enabled": true,
   "daily_summary_hour_local": 21,
-  "daily_summary_top_n": 10
+  "daily_summary_top_n": 10,
+  "priority_single_lower_usd": 2000,
+  "priority_single_unknown_usd": 3000,
+  "priority_position_usd": 4000,
+  "priority_cluster_usd": 6000,
+  "priority_cooldown_seconds": 7200,
+  "normal_cooldown_seconds": 3600,
+  "normal_digest_interval_seconds": 900,
+  "normal_digest_top_n": 10
 }
