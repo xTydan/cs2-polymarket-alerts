@@ -17,6 +17,9 @@ import requests
 HLTV_URL = "https://www.hltv.org/results"
 MAX_AGE_SECONDS = 72 * 3600
 MATCH_TOLERANCE_SECONDS = 18 * 3600
+# HTML void elements do not have closing tags; counting them as nested
+# elements prevents the result-con card from ever being finalized.
+VOID_ELEMENTS = {'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr'}
 ALIAS = {
     "navi": "natus vincere",
     "na vi": "natus vincere",
@@ -58,6 +61,8 @@ class ResultsParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         attr = dict(attrs)
         classes = set(attr.get("class", "").split())
+        if tag in VOID_ELEMENTS:
+            return
         if "result-con" in classes and self.card is None:
             self.card = {"teams": [], "scores": [], "timestamp": 0, "url": ""}
             self.depth = 1
@@ -94,6 +99,8 @@ class ResultsParser(HTMLParser):
             self.card[target].append(data.strip())
 
     def handle_endtag(self, tag):
+        if tag in VOID_ELEMENTS:
+            return
         if self.card is None:
             return
         if self.field and self.depth == self.field_depth:
@@ -182,7 +189,10 @@ def refresh(cache_path: Path, events: list[dict]) -> dict:
         if not results:
             # A 200 response can still be a Cloudflare challenge or changed markup.
             # Treat zero results as unavailable, not as proof no matches finished.
-            print(f"HLTV: parser nie znalazl wynikow (HTTP {response.status_code}, HTML {len(response.content)} B). Sprawdz Cloudflare/format strony.")
+            sample = response.text
+            print(f"HLTV: 0 wynikow (HTTP {response.status_code}, HTML {len(response.content)} B, "
+                  f"result-con={sample.count('result-con')}, team-cell={sample.count('team-cell')}, "
+                  f"result-score={sample.count('result-score')}). Sprawdz Cloudflare/format strony.")
         else:
             print(f"HLTV: {len(results)} wynikow, {len(new)} dopasowanych meczow.")
     except (requests.RequestException, ValueError, UnicodeError) as err:
