@@ -85,7 +85,19 @@ class HltvMatchesTests(unittest.TestCase):
 
     def test_do_not_archive_unmatched_upcoming(self):
         previous = {"a": {"status": "upcoming", "source": "hltv-matches", "observedAt": 100}}
-        self.assertEqual(reconcile(previous, {}, [{"key": "a"}], 1000), {})
+        once = reconcile(previous, {}, [{"key": "a"}], 1000)
+        self.assertEqual(once["a"]["status"], "upcoming")
+        later = reconcile(once, {}, [{"key": "a"}], 1950)
+        self.assertEqual(later["a"]["status"], "uncertain")
+        self.assertFalse(later["a"]["confirmed"])
+
+    def test_closed_poly_events_are_not_resurrected(self):
+        now = 1800000000
+        fixture = [{"teams": ["team a", "team b"], "status": "live", "start": 0,
+                    "url": "https://www.hltv.org/matches/1/one"}]
+        closed = [{"key": "old", "title": "Team A vs Team B (BO3)",
+                   "start": now - 100, "closed": True}]
+        self.assertEqual(match_schedule(closed, fixture, now), {})
 
     def test_delayed_upcoming_remains_upcoming(self):
         now = 1800000000
