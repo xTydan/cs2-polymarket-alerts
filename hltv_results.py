@@ -26,6 +26,9 @@ ALIAS = {
     "virtus pro": "virtus pro",
     "vp": "virtus pro",
     "mouz nxt": "mouz nxt",
+    # Polymarket uses a stylized zero, HLTV sometimes the letter o.
+    # Match by exact canonical alias, never globally replace all 0/o characters.
+    "underw0rld": "underworld",
 }
 
 
