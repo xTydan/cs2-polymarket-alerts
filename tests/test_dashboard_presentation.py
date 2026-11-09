@@ -18,6 +18,15 @@ class DashboardPresentationTests(unittest.TestCase):
         self.assertIn("if(!expanded){list.hidden=true;content.append(list);continue;}", SCRIPT)
         self.assertIn(".fixtures-toggle", STYLE)
 
+    def test_delay_aware_labels_and_probable_group(self):
+        self.assertIn("['possible',true]", SCRIPT)
+        self.assertIn("Możliwe LIVE", SCRIPT)
+        self.assertIn("48*3600", SCRIPT)
+        self.assertIn("LIVE?", SCRIPT)
+        self.assertIn("PO PLANIE", SCRIPT)
+        self.assertIn("dopasowanie prawdopodobne", SCRIPT)
+        self.assertIn("e.start=e.hltv.start", SCRIPT)
+
     def test_market_selection_is_by_condition_id_with_activity(self):
         self.assertIn("eRows.filter(r=>r.c===m.c)", SCRIPT)
         self.assertIn("o.value=item.m.c", SCRIPT)
