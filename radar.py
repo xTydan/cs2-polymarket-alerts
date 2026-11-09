@@ -620,7 +620,7 @@ class Database:
                 VALUES (?,?,?,?,?,?,?,'',?)""",
                 (trade['id'], now, trade['condition_id'], trade['outcome'],
                  trade.get('wallet') or '', kind,
-                 float(trade['usd'])  # store the actual BUY, never a cumulative position,
+                 float(trade['usd']),  # store the actual BUY, never a cumulative position
                  float(avg_odds if avg_odds is not None else 1 / trade['price'])))
             return True
 
