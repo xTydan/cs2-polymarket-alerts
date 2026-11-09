@@ -1,35 +1,51 @@
-# CS2 Polymarket Radar v1.5 — aktualizacja do GitHub Actions
+# CS2 Polymarket Radar v1.10 — Terminy + filtr obrotu
 
-Ta paczka aktualizuje **istniejący** radar v1.4. Nie zakładaj nowego repozytorium ani nowego bota Telegram. Działający harmonogram w cron-job.org i dotychczasowy `radar.yml` pozostają bez zmian.
+Aktualizacja do wersji **v1.9**. Wymienia tylko `radar.py`, `build_dashboard.py`, `config.json` w głównym katalogu repozytorium. Nie zmieniaj `.github/workflows/radar.yml`, `github_state.py`, sekretów Telegrama ani cron-job.org. Nie wrzucaj `.env`, lokalnej bazy lub tokenów.
+
+## Co zmienia
+
+- Godzinę meczu odczytuje z `gameStartTime` konkretnego rynku oraz `startTime` wydarzenia. Dodatkowo obsługuje daty ISO z `Z`, przesunięciem strefy, ze spacją lub bez, a także znaczniki Unix w sekundach / milisekundach. Daty bez oznaczonej strefy są interpretowane jako UTC. Na stronie każdą godzinę wyświetla w **Europe/Warsaw**. Nie używa `startDate` (data wystawienia rynku) ani `endDate` (termin zakończenia/rozliczenia) jako godziny rozpoczęcia meczu.
+- Wyszukuje łączny **obrót wydarzenia Polymarket** (`volume` / `volumeNum`, a jeśli niepodany — sumę `volumeNum` z rynków). Nie myli go z `liquidity` ani z zakupami zauważonymi przez radar.
+- **Nowe wydarzenia ze znanym obrotem mniejszym niż 100 USD są ignorowane przy wyborze rynków do skanowania.** Dotyczy to *całego wydarzenia*, nie pojedynczej transakcji ani zakładu. Gdy obrót wzrośnie do 100 USD, mecz może pojawić się podczas kolejnego discovery (domyślnie maksymalnie ok. 10 minut od poprzedniego discovery; opóźnienie GitHub i API może być większe).
+- Kiedy API nie zwraca wiarygodnego obrotu, wydarzenie nie jest odrzucane tylko z tego powodu. Kiedy nie zwraca godziny — panel pokazuje „Bez terminu”, zamiast zgadywać.
+- Na stronie obok meczu widać `Obrót Polymarket` osobno od `Radar: ... zakupów` (to tylko zaobserwowane zakupy). Dodano filtr obrotu od 0, 100, 250, 500 lub 1000 USD. Domyślnie 100 USD.
+- Stan konta użytkownika, historia SQLite i alerty Telegram pozostają w dotychczasowej postaci. Uaktualniony cache ma nowy podpis i zostanie odświeżony po wdrożeniu.
 
 ## Instalacja
 
-1. Zrób kopię zapasową aktualnych `radar.py` i `config.json` z repozytorium.
-2. Wejdź do `https://github.com/xTydan/cs2-polymarket-alerts` → **Code**.
-3. Podmień w **głównym folderze repozytorium** oba pliki `radar.py` i `config.json` zawartością tej paczki. Zatwierdź **Commit changes** do `main`.
-4. **Nie przesyłaj** pliku `.env`, tokenu Telegrama, bazy SQLite ani historii z Twojego komputera.
-5. Pozostaw `github_state.py`, `.github/workflows/radar.yml`, GitHub Secrets i konfigurację cron-job.org **bez zmian**.
-6. Przejdź do **Actions → CS2 Polymarket Radar → Run workflow** i uruchom z `test_telegram = false`. Otwórz zadanie `scan` i sekcję **Skanuj Polymarket lub przetestuj Telegram**.
-7. W logach zobaczysz `TX | lower/unknown | ... | $... | portfel ... | ALERT ...` lub `BRAK ALERTU ...`. Dopiero jeśli nowy alert zostanie zakwalifikowany i wysłany, przyjdzie wiadomość na Telegram.
-8. Aby nie skanować dwa razy, przy sprawnym cron-job.org można usunąć tylko blok `schedule` z workflow, ale **nie usuwaj** `workflow_dispatch` (potrzebny do wyzwalania przez API).
+1. **Wypakuj** archiwum ZIP na swoim komputerze.
+2. Otwórz: https://github.com/xTydan/cs2-polymarket-alerts
+3. Wejdź w **Code → Add file → Upload files** i wgraj **trzy pliki**: `radar.py`, `build_dashboard.py`, `config.json` (nadpisz istniejące pliki w **głównym katalogu**).
+4. Kliknij **Commit changes** na gałęzi `main`.
+5. W **Actions → CS2 Polymarket Radar → Run workflow** wybierz `test_telegram = false` i uruchom normalny skan. Obserwuj log. Powinien pojawić się komunikat podobny do:
 
-## Nowe działanie
+   ```text
+   Odkryto 200 wydarzeń CS2 i 600 rynków; odfiltrowano 30 wydarzeń z obrotem < $100; brak obrotu w 5; brak terminu w 20 rynkach
+   ```
 
-- Raportowane w logach są **nowe, zaobserwowane** zakupy od 100 USD na znalezionych rynkach CS2, z kwotą, wynikiem, meczem, skrótem portfela i przyczyną alertu lub odrzucenia. Wcześniej zapisane transakcje nie będą powtarzane.
-- Niższy tier (rozpoznany po słowach w nazwie rozgrywek): pojedynczy zakup **≥500 USD**, suma zakupów jednego portfela na jeden wynik **≥900 USD w 6 h**, albo **≥1500 USD w 24 h**.
-- Nieustalony tier: odpowiednio **≥1000 USD**, **≥1700 USD / 6 h**, **≥3500 USD / 24 h**.
-- Kilka portfeli na jeden wynik: co najmniej **3 portfele**, łączna kwota **≥3000 USD w 10 minut**.
-- Przy pierwszym skanie po godzinie **21:00 czasu polskiego** bot wysyła codzienny ranking maksymalnie 10 największych zaobserwowanych sum zakupów *jednego portfela na jeden wynik* na rozpoznanych niższych ligach w danym dniu. Jeśli nie ma takich zakupów, raport informuje o braku danych. Powstaje najwyżej jeden raport na dzień (jeśli zapis bazy zostanie przywrócony).
-- Poprawiono przetwarzanie stron transakcji w kolejności chronologicznej.
-- Stan/wykryte transakcje i kolejka wiadomości pozostają w tej samej bazie SQLite; istniejący `github_state.py` nadal ją przenosi między skanami.
+   *Wszystkie liczby wyżej są przykładowe.*
+6. Poczekaj na zakończenie etapu publikacji panelu, odśwież GitHub Pages `Ctrl + F5`.
 
-## Istotne ograniczenia
+## Ustawienia
 
-- Nie oznaczamy turnieju jako oficjalnie „Tier 3”; klasyfikacja to heurystyka. Część turniejów i portfeli może zostać pominięta.
-- Sumujemy zaobserwowane **zakupy brutto**, a nie aktualny kapitał w pozycji. Nie odejmujemy sprzedaży i nie obejmujemy transakcji niewidocznych dla API lub przed zainstalowaniem monitora.
-- Dane na API Polymarket i harmonogram GitHub/cron-job.org mogą mieć opóźnienia. Sygnał nie dowodzi ustawienia meczu ani posiadania informacji poufnych.
-- Codzienne raporty na publicznym GitHubie nie stanowią archiwum niezależnego od bazy; jeśli stan zniknie, nie odtworzą się wcześniejsze zakupy.
+W `config.json`:
 
-## Testy
+```json
+"minimum_event_volume_usd": 100,
+"discover_seconds": 600,
+"lookback_seconds": 900
+```
 
-W paczce wdrożeniowej są tylko pliki do podmiany i instrukcja; kod źródłowy był testowany na przykładowych, **fikcyjnych** danych (25 testów offline). Integracja na żywo z Twoim GitHubem i Telegramem nie była w tym wydaniu uruchamiana.
+`minimum_event_volume_usd = 0` pozwala monitorować wszystkie rynki niezależnie od obrotu. `discover_seconds` oznacza co ile sekund radar ponawia wyszukiwanie wydarzeń; przebiegi GitHub Actions i cron-job.org nadal odbywają się co około 5 minut. `lookback_seconds = 900` zwiększa szansę wychwycenia zakupów w wydarzeniu, które właśnie przekroczyło 100 USD, ale nie gwarantuje pełnej historii podczas dłuższych opóźnień lub awarii.
+
+## Co znaczy „Tier 4”?
+
+Obrót poniżej 100 USD to **Twój filtr popularności**, nie oficjalny tier rozgrywek. Zdarza się, że mecz silniejszych zespołów ma mały obrót przed rozpoczęciem, dlatego świadomie możesz przeoczyć pierwsze zakłady, zanim wydarzenie osiągnie 100 USD. W razie potrzeby zmniejsz próg lub ustaw `0`.
+
+## Znane ograniczenia
+
+- Terminy dostępne na stronie Polymarket nie muszą być dostępne w polach `gameStartTime`/`startTime` publicznej odpowiedzi Gamma dla każdego wydarzenia. Nie próbujemy odgadywać godziny z `endDate`, `startDate` ani daty publikacji; te mecze pozostaną „Bez terminu”.
+- Filtr po obrocie stosowany jest **po pobraniu metadanych wydarzeń Gamma**, ale **przed** pobraniem transakcji z Data API. To ogranicza liczbę monitorowanych rynków i koszt skanowania; nie eliminuje konieczności pobrania katalogu wydarzeń.
+- W bazie pozostaną wcześniejsze transakcje i metadane, w tym z wydarzeń obecnie odfiltrowanych. Nie usuwamy ich podczas aktualizacji.
+- Czas rzeczywistego uruchomienia może różnić się od zaplanowanego (opóźnienia turniejów). Status LIVE nie jest potwierdzany z Polymarket.
+- Nie sprawdzono zapytań przeciwko żywemu API po wdrożeniu. Testy lokalne obejmują parsowanie dat, grupowanie eventów, filtr 100 USD, migrację SQLite i działanie panelu w Chromium.

@@ -47,6 +47,7 @@ VALID_CONDITION = re.compile(r"^0x[0-9a-fA-F]{64}$")
 DEFAULT = {
     "poll_seconds": 25,
     "discover_seconds": 600,
+    "minimum_event_volume_usd": 100,  # calkowity obrot wydarzenia na Polymarket
     "minimum_buy_usd": 1000,
     "absolute_whale_usd": 5000,
     "relative_market_volume": 0.25,
@@ -169,6 +170,8 @@ def load_config(path: Path) -> dict:
     for key in ("poll_seconds", "discover_seconds", "cluster_window_seconds"):
         if number(config[key]) < 5:
             raise ValueError(f"{key} nie może być mniejsze niż 5")
+    if number(config["minimum_event_volume_usd"], -1) < 0:
+        raise ValueError("minimum_event_volume_usd musi byc >= 0")
     if not 0 < number(config["relative_market_volume"]) <= 1:
         raise ValueError("relative_market_volume musi być w przedziale (0,1]")
     for key in ("priority_single_lower_usd", "priority_single_unknown_usd", "priority_position_usd",
@@ -261,25 +264,78 @@ class ApiClient:
 
 
 def sports_start_timestamp(value: Any) -> int:
-    """Czas rozpoczecia spotkania, NIE data wystawienia rynku.
+    """Termin meczu z Gamma, nigdy `startDate` (utworzenie rynku).
 
-    Gamma gameStartTime bywa w formacie `2026-11-09 18:00:00+00`.
-    Brak godzin i brak strefy czasowej traktujemy jako brak pewnego terminu.
+    Formaty: ISO 8601 z TZ, UTC `Z`, `+00`, epoch seconds/ms, a takze
+    ISO bez TZ (domyslnie UTC, jak w API sportowym). Date-only odrzucamy.
+    Brak wystarczajacych danych = 0 i napis `Bez terminu` na stronie.
     """
-    if not value or not isinstance(value, str):
+    if value is None or isinstance(value, bool):
         return 0
-    clean = value.strip().replace(" ", "T", 1)
-    if not re.search(r"T\d{2}:\d{2}", clean):
-        return 0
-    clean = clean.replace("Z", "+00:00")
-    clean = re.sub(r"([+-]\d{2})$", r"\1:00", clean)
     try:
-        start = datetime.fromisoformat(clean)
-        if start.tzinfo is None:
+        if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().isdigit()):
+            stamp = float(value)
+            if stamp > 1e11:  # timestamp w milisekundach
+                stamp /= 1000
+            return int(stamp) if 1577836800 <= stamp <= 4102444800 else 0
+        if not isinstance(value, str):
             return 0
-        return int(start.timestamp())
-    except (ValueError, OverflowError):
+        clean = value.strip().replace(' ', 'T', 1)
+        if not re.search(r'T\d{1,2}:\d{2}', clean):
+            return 0
+        clean = re.sub(r'Z$', '+00:00', clean, flags=re.I)
+        clean = re.sub(r'([+-]\d{2})$', r'\1:00', clean)
+        stamp = datetime.fromisoformat(clean)
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)  # daty bez strefy w Gamma sa UTC
+        epoch = stamp.timestamp()
+        return int(epoch) if 1577836800 <= epoch <= 4102444800 else 0
+    except (ValueError, TypeError, OverflowError):
         return 0
+
+
+def event_turnover(event: dict) -> float | None:
+    """Skumulowany volume wydarzenia, NIE liquidity ani zakupy naszego radaru.
+
+    Gdy volume wydarzenia jest opóźnione, bierzemy większą z wartości:
+    event.volume i suma market.volumeNum (po jednym wpisie na rynek).
+    Nieznany obrót => None: nie pomijamy wydarzenia bez dowodu niskiego obrotu.
+    """
+    candidates: list[float] = []
+    for key in ('volume', 'volumeNum'):
+        val = event.get(key)
+        if val is not None and val != '':
+            v = number(val, -1)
+            if v >= 0:
+                candidates.append(v)
+    volumes = []
+    for market in event.get('markets') or []:
+        if not isinstance(market, dict):
+            continue
+        raw = market.get('volumeNum')
+        if raw is None or raw == '':
+            raw = market.get('volume')
+        if raw is not None and raw != '':
+            v = number(raw, -1)
+            if v >= 0:
+                volumes.append(v)
+    if volumes:
+        candidates.append(sum(volumes))
+    return max(candidates) if candidates else None
+
+
+def match_kickoff(event: dict, market: dict) -> int:
+    """Najpierw godzina konkretnego rynku sportowego, potem wydarzenia.
+
+    Pole endDate to termin rozliczenia, startDate to wystawienie rynku.
+    Nie traktujemy ich jako godziny meczu, nawet gdy inne pola sa puste.
+    """
+    for value in (market.get('gameStartTime'), market.get('startTime'),
+                  event.get('startTime'), event.get('gameStartTime')):
+        ts = sports_start_timestamp(value)
+        if ts:
+            return ts
+    return 0
 
 
 def series_name(value: Any) -> str:
@@ -308,6 +364,7 @@ class EventMarket:
     match_start: int = 0
     league: str = ''
     event_closed: bool = False
+    event_volume: float | None = None
 
     @property
     def link(self) -> str:
@@ -360,6 +417,7 @@ class Database:
         self._add_column("trade_market_info", "match_start", "INTEGER NOT NULL DEFAULT 0")
         self._add_column("trade_market_info", "league", "TEXT NOT NULL DEFAULT ''")
         self._add_column("trade_market_info", "event_closed", "INTEGER NOT NULL DEFAULT 0")
+        self._add_column("trade_market_info", "event_volume", "REAL")
         self.conn.commit()
 
     def _add_column(self, table: str, column: str, spec: str) -> None:
@@ -392,11 +450,11 @@ class Database:
             self.conn.execute(
                 """INSERT OR REPLACE INTO trade_market_info
                    (condition_id,title,market_title,slug,tier,outcomes_json,event_id,
-                    match_start,league,event_closed)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    match_start,league,event_closed,event_volume)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (market.condition_id, market.title, market.market_title, market.event_slug,
                  market.tier, json.dumps(market.outcomes, ensure_ascii=False), market.event_id,
-                 market.match_start, market.league, int(market.event_closed))
+                 market.match_start, market.league, int(market.event_closed), market.event_volume)
             )
 
     def daily_top_positions(self, since: int, until: int, limit: int, min_odds: float = 1.2) -> list[tuple]:
@@ -549,7 +607,8 @@ class Radar:
     def cache_signature(self) -> str:
         # Odrzucenie cache po zmianie ustawień klasyfikacji.
         data = {k: self.cfg[k] for k in (
-            "max_events", "exclude_major_tournaments", "max_market_volume_unknown_usd")}
+            "max_events", "exclude_major_tournaments", "max_market_volume_unknown_usd",
+            "minimum_event_volume_usd") }
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
     def load_market_cache(self) -> None:
@@ -687,6 +746,9 @@ class Radar:
         markets: dict[str, EventMarket] = {}
         ev_ids: set[str] = set()
         matches = 0
+        ignored_low_volume = 0
+        unknown_volume = 0
+        missing_kickoffs = 0
         for eid, ev in events.items():
             title = str(ev.get("title") or "")
             if not MATCH.search(title):
@@ -700,7 +762,13 @@ class Radar:
                 # obejmować również inne gry (Valorant, LoL itp.).
                 continue
             tier = classify(title)
-            volume = number(ev.get("volume"), 0)
+            volume_value = event_turnover(ev)
+            if volume_value is None:
+                unknown_volume += 1  # nie odrzucaj rynku przy nieznanym obrocie
+            elif volume_value < number(self.cfg['minimum_event_volume_usd']):
+                ignored_low_volume += 1
+                continue  # nie pobieramy transakcji tych wydarzen
+            volume = volume_value if volume_value is not None else 0
             if self.cfg["exclude_major_tournaments"] and tier == "major":
                 continue
             if (tier == "unknown" and self.cfg["exclude_major_tournaments"] and
@@ -712,7 +780,7 @@ class Radar:
                 continue
             added = 0
             # `startDate` to zwykle utworzenie rynku. Nie stosujemy go jako godziny meczu.
-            event_match_start = sports_start_timestamp(ev.get('startTime'))
+            event_match_start = sports_start_timestamp(ev.get('startTime')) or sports_start_timestamp(ev.get('gameStartTime'))
             league = series_name(ev.get('series')) or series_name(ev.get('seriesItem'))
             for m in ev.get("markets") or []:
                 if not isinstance(m, dict) or m.get("closed") is True:
@@ -740,9 +808,12 @@ class Radar:
                     market_volume=number(market_volume) if market_volume is not None else None,
                     liquidity=number(liquidity) if liquidity is not None else None,
                     tier=tier, outcomes=[str(o) for o in raw_outcomes],
-                    match_start=sports_start_timestamp(m.get('gameStartTime')) or event_match_start,
-                    league=league, event_closed=bool(ev.get('closed', False))
+                    match_start=match_kickoff(ev,m) or event_match_start,
+                    league=league, event_closed=bool(ev.get('closed', False)),
+                    event_volume=volume_value
                 )
+                if not markets[cond.casefold()].match_start:
+                    missing_kickoffs += 1
                 added += 1
             if added:
                 ev_ids.add(eid)
@@ -750,7 +821,10 @@ class Radar:
         self.markets, self.event_ids = markets, sorted(ev_ids, key=int)
         self.last_discovery = time.time()
         self.save_market_cache()
-        LOG.info("Odkryto %s wydarzeń CS2 i %s rynków; tagi: %s", matches, len(markets), ",".join(self.tag_ids))
+        LOG.info("Odkryto %s wydarzeń CS2 i %s rynków; odfiltrowano %s wydarzeń z obrotem < $%.0f; brak obrotu w %s; brak terminu w %s rynkach; tagi: %s",
+                 matches, len(markets), ignored_low_volume,
+                 number(self.cfg['minimum_event_volume_usd']), unknown_volume,
+                 missing_kickoffs, ",".join(self.tag_ids))
 
     @staticmethod
     def normalize(trade: dict) -> dict | None:

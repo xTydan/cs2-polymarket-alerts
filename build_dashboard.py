@@ -39,10 +39,12 @@ def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000) -> dict:
             start_col = 'match_start' if 'match_start' in market_cols else '0'
             league_col = 'league' if 'league' in market_cols else "''"
             closed_col = 'event_closed' if 'event_closed' in market_cols else '0'
+            volume_col = 'event_volume' if 'event_volume' in market_cols else 'NULL'
             for r in con.execute(f'''SELECT condition_id,title,market_title,slug,tier,
                                      {outcomes_col} AS outcomes_json, {eid_col} AS event_id,
                                      {start_col} AS match_start, {league_col} AS league,
-                                     {closed_col} AS event_closed
+                                     {closed_col} AS event_closed,
+                                     {volume_col} AS event_volume
                                      FROM trade_market_info'''):
                 market_db[str(r['condition_id']).lower()] = dict(r)
     finally:
@@ -83,10 +85,14 @@ def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000) -> dict:
         if not isinstance(outcomes,list):
             outcomes = []
         outcomes = list(dict.fromkeys(str(x)[:100] for x in outcomes if str(x).strip()))[:12]
+        ev_vol = b.get('event_volume') if b.get('event_volume') is not None else a.get('event_volume')
+        try: ev_vol = max(0.0, float(ev_vol)) if ev_vol is not None else None
+        except (ValueError, TypeError, OverflowError): ev_vol = None
         markets[cid] = {'c':cid,'m':title or 'Nieznany mecz (brak metadanych)',
                         'q':question,'s':slug,'tier':tier,'o':outcomes,
                         'e':str(a.get('event_id') or b.get('event_id') or '')[:50],
                         'start':int(b.get('match_start') or a.get('match_start') or 0),
+                        'volume':ev_vol,
                         'league':str(b.get('league') or a.get('league') or '')[:140],
                         'closed':bool(b['event_closed'] if 'event_closed' in b else a.get('event_closed') or False)}
     trades = []
@@ -116,7 +122,7 @@ def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000) -> dict:
         'minimum':100,
         'trades':trades,
         'markets':view_markets,
-        'notice': 'Zaobserwowane BUY od progu pobierania API. Planowana godzina meczu pochodzi z gameStartTime/startTime Polymarket, status LIVE nie jest potwierdzany. Nie wszystkie zaklady, nie saldo otwartych pozycji.'
+        'notice': 'Godziny meczu z gameStartTime/startTime Gamma, PL. Obrót PM to suma wymian na Polymarket, a nie suma zakupów zaobserwowanych przez radar. Domyślnie bez nowych rynków o znanym obrocie poniżej 100 USD; brak obrotu nie skutkuje usunięciem. Zakupy BUY nie są saldem pozycji.'
     }
 
 
@@ -233,10 +239,12 @@ for(const e of allEvents.values()){
  e.start=starts.length?Math.min(...starts):0;
  e.closed=e.markets.every(m=>!!m.closed);
  e.league=e.markets.map(m=>m.league||'').find(Boolean)||'';
+ const known=e.markets.map(m=>m.volume).filter(v=>typeof v==='number'&&Number.isFinite(v));
+ e.volume=known.length?Math.max(...known):null;
  e.teams=parsedTeams(e.title);
  e.region=getRegion(e);
 }
-let stageChoice='all',leagueChoice='all',regionChoice='all',onlyWithTrades=false;
+let stageChoice='all',leagueChoice='all',regionChoice='all',onlyWithTrades=false,minPMVolume=100;
 function fixtureRow(x){
  const {e,rr}=x, m=pickMarket(e,rr),main=rr.filter(r=>r.c===m?.c),side=getSides(m,main);
  const sideA=side.find(s=>s.o.toLowerCase()===e.teams[0].toLowerCase())||side[0];
@@ -246,6 +254,7 @@ function fixtureRow(x){
  const stage=eventStatus(e);
  const when=e.start?timeFmt.format(e.start*1000):'—:—';
  t.append(mk('div','fixture-clock',when));
+ t.title=e.start?'Planowane rozpoczęcie: '+dt(e.start)+' (czas polski)':'Polymarket nie podał godziny rozpoczęcia';
  t.append(mk('div','fixture-when '+stage,stage==='started'?'PO STARCIE':stage==='upcoming'?'PLAN':stage==='archive'?'ARCHIWUM':'BEZ GODZ.'));
  const teams=mk('div','fixture-teams');
  const a=mk('div','fixture-team',e.teams[0]||e.title),b=mk('div','fixture-team',e.teams[1]||'Drugi zespół nieustalony');
@@ -257,7 +266,7 @@ function fixtureRow(x){
  const v1=mk('div','side-value',sideA?.fills?money(sideA.total):'—');
  const v2=mk('div','side-value',sideB?.fills?money(sideB.total):'—');
  rvalue.append(child(mk('div','side-stack'),mk('span','side-caption','Zakupy · '+(e.teams[0]||sideA?.o||'strona A')),v1),child(mk('div','side-stack'),mk('span','side-caption','Zakupy · '+(e.teams[1]||sideB?.o||'strona B')),v2));
- const sum=mk('div','fixture-volume');sum.append(mk('div','fixture-total money',x.volume>0?money(x.volume):'—'),mk('div','small muted',`${rr.length} zakupów · wszystkie rynki`));
+ const sum=mk('div','fixture-volume');sum.append(mk('div','fixture-total money',e.volume===null?'Brak obrotu':money(e.volume)),mk('div','small muted','Obrót Polymarket · wszystkie rynki'),mk('div','small muted',`Radar: ${money(x.volume)} · ${rr.length} zakupów`));
  const best=rr.length?Math.max(...rr.map(r=>1/r.p)):0;
  const odds=mk('div','fixture-odds',best?`max ${best.toFixed(2)}`:'—');odds.title='Najwyższy kurs zaobserwowanego zakupu w zastosowanych filtrach; nie jest to obecny kurs';
  row.append(t,teams,meta,rvalue,sum,odds,mk('span','fixture-arrow','›'));
@@ -270,6 +279,7 @@ function showMatches(rows){
  const matches=[];
  for(const e of allEvents.values()){
   if(!e.markets.length||e.title.startsWith('Nieznany mecz'))continue;
+  if(e.volume!==null && e.volume<minPMVolume)continue;
   const rr=byEvent.get(e.key)||[];
   // Jesli filtrowane jest konkretne obstawienie lub portfel, nie pokazuj pustych meczow.
   const deepSearch=!!$('#outcome').value.trim()||(/0x[a-f0-9]{4,}/i).test($('#search').value)||Number($('#min').value)>0||!!$('#max').value;
@@ -290,6 +300,10 @@ function showMatches(rows){
  for(const [key,label] of choices){const btn=mk('button','fixture-stage'+(stageChoice===key?' active':''),label);btn.type='button';
   btn.onclick=()=>{stageChoice=key;displayLimit=160;render()};sidebar.append(btn)}
  const toggle=mk('label','fixture-check');const cb=mk('input');cb.type='checkbox';cb.checked=onlyWithTrades;cb.onchange=()=>{onlyWithTrades=cb.checked;render()};toggle.append(cb,mk('span','','Tylko mecze z zakupami'));sidebar.append(toggle);
+ sidebar.append(mk('div','side-heading gap-above','OBRÓT POLYMARKET'));
+ const vol=mk('select','fixture-select');for(const [value,label] of [['0','Bez minimum'],['100','Min. 100 USD'],['250','Min. 250 USD'],['500','Min. 500 USD'],['1000','Min. 1 000 USD']]){const op=mk('option','',label);op.value=value;vol.append(op)}
+ vol.value=String(minPMVolume);vol.onchange=()=>{minPMVolume=Number(vol.value);render()};sidebar.append(vol);
+ sidebar.append(mk('p','fixture-aside-note','Kwota dotyczy całkowitego obrotu na Polymarket, a nie wyłącznie zakupów zarejestrowanych przez radar. Nieznany obrót nie jest wykluczany.'));
  sidebar.append(mk('div','side-heading gap-above','TURNIEJ'));
  const ligues=[...new Set([...allEvents.values()].map(leagueName))].sort((a,b)=>a.localeCompare(b,'pl'));
  const select=mk('select','fixture-select');const optAll=mk('option','', 'Wszystkie turnieje');optAll.value='all';select.append(optAll);
@@ -297,7 +311,7 @@ function showMatches(rows){
  sidebar.append(mk('div','side-heading gap-above','REGION (Z NAZWY)'));
  const reg=mk('select','fixture-select');for(const lg of ['all','Europa','Ameryka Płd.','Ameryka Płn.','Azja / Oceania','Nieustalony']){const op=mk('option','',lg==='all'?'Wszystkie regiony':lg);op.value=lg;reg.append(op)}reg.value=regionChoice;reg.onchange=()=>{regionChoice=reg.value;render()};sidebar.append(reg);
  sidebar.append(mk('p','fixture-aside-note','* „Po starcie” oznacza upływ planowanej godziny, a nie potwierdzone LIVE. Terminy z Polymarket, gdy dostępne.'));
- const content=mk('section','fixture-content');const top=mk('div','fixture-main-head');top.append(child(mk('div'),mk('h2','','Mecze Counter-Strike 2'),mk('div','small muted',`${matches.length} spotkań • zakupy od progu API • czasy PL`)));
+ const content=mk('section','fixture-content');const top=mk('div','fixture-main-head');top.append(child(mk('div'),mk('h2','','Mecze Counter-Strike 2'),mk('div','small muted',`${matches.length} spotkań • obrót PM ≥ ${money(minPMVolume)} (gdy znany) • godziny PL`)));
  const meta=mk('span','fixture-count',`${matches.filter(x=>x.rr.length).length} z zakupami`);top.append(meta);content.append(top);
  const missing=[...allEvents.values()].filter(e=>e.title.startsWith('Nieznany mecz')&&e.rows.length).length;
  if(missing)content.append(mk('p','small muted fixture-legacy',`Starsze wpisy bez nazw spotkań (${missing} rynków) znajdziesz w zakładce Transakcje.`));
@@ -360,10 +374,10 @@ if(location.hash.startsWith('#match=')){const key=decodeURIComponent(location.ha
 
 def build_page(data: dict) -> str:
     raw = json.dumps(data, ensure_ascii=False, separators=(',',':')).replace('<','\\u003c').replace('>','\\u003e').replace('&','\\u0026')
-    html = '''<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080d16"><title>CS2 Polymarket Radar v1.9 — terminarz CS2</title>'''
+    html = '''<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080d16"><title>CS2 Polymarket Radar v1.10 — terminy i wolumen</title>'''
     html += STYLE + '''</head><body><div class="shell">
-<header class="brandbar"><div class="brand"><div class="logo" aria-hidden="true">◎</div><div><h1>CS2 Radar <span class="muted">/ Terminarz v1.9</span></h1><div class="small muted">Obserwowane zakupy Polymarket · Tier 2/3</div></div></div><div class="status"><span class="bullet"></span>Eksport po skanie GitHub Actions</div></header>
-<div class="note"><b>Uwaga:</b> pokazujemy tylko zaobserwowane BUY od progu API (zwykle 100 USD). Kurs na stronie to kurs zaobserwowanego zakupu, nie aktualna oferta. Domyślny filtr zakupów to ≥ 1.20. Suma zakupów nie oznacza aktualnej pozycji portfela ani pełnego wolumenu Polymarket.</div>
+<header class="brandbar"><div class="brand"><div class="logo" aria-hidden="true">◎</div><div><h1>CS2 Radar <span class="muted">/ Terminarz v1.10</span></h1><div class="small muted">Obserwowane zakupy Polymarket · Tier 2/3</div></div></div><div class="status"><span class="bullet"></span>Eksport po skanie GitHub Actions</div></header>
+<div class="note"><b>Uwaga:</b> pokazujemy tylko zaobserwowane BUY od progu API (zwykle 100 USD). Kurs na stronie to kurs zaobserwowanego zakupu, nie aktualna oferta. Domyślny filtr zakupów to ≥ 1.20. Obrót Polymarket to łączna wartość handlu w wydarzeniu; suma zakupów radaru to osobna, niepełna obserwacja. Rynki ze znanym obrotem poniżej 100 USD są domyślnie wyłączone.</div>
 <section class="kpis"><div class="kpi"><div class="hint">Zakupy w filtrze</div><div id="nTrades" class="big">—</div></div><div class="kpi"><div class="hint">Łączna wartość brutto</div><div id="nUSD" class="big">—</div></div><div class="kpi"><div class="hint">Mecze z aktywnością</div><div id="nGames" class="big">—</div></div><div class="kpi"><div class="hint">Portfele</div><div id="nWallets" class="big">—</div></div></section>
 <nav class="tabs" aria-label="Widoki panelu"><button type="button" class="tab active" data-tab="matches">⚔ Mecze</button><button type="button" class="tab" data-tab="trades">▤ Transakcje</button><button type="button" class="tab" data-tab="positions">▥ Pozycje portfeli</button><button type="button" class="tab" data-tab="wallets">♙ Portfele</button></nav>
 <div class="toolbar"><input id="search" type="search" placeholder="Mecz, drużyna, turniej, portfel…" aria-label="Szukaj">
@@ -378,7 +392,7 @@ def build_page(data: dict) -> str:
 <select id="sort" aria-label="Sortowanie"><option value="largest" selected>Sortuj: największe kwoty</option><option value="newest">Sortuj: najnowsze</option><option value="odds">Sortuj: najwyższe kursy</option></select>
 <button id="export" type="button">↓ Eksport CSV</button></div>
 <main id="main" aria-live="polite"></main>
-<footer><p>Ostatni pełny skan: <b id="scan"></b> · Wygenerowano: <b id="stamp"></b> (czas polski). Odśwież stronę, aby zobaczyć najnowszy opublikowany raport.</p><p>Godziny spotkań są planowanymi terminami z Gamma API (jeśli dostępne). „Po starcie” nie potwierdza gry LIVE, a „Archiwum” nie oznacza zweryfikowanego końcowego wyniku. Porównanie stron rynku opiera się wyłącznie na zarejestrowanych BUY: obie strony mogą nie mieć równych danych. Podział na niższe tiery jest heurystyczny. Transakcje bez pełnych metadanych mogą znajdować się w osobnej grupie „Nieznany mecz”.</p><p>Panel jest publiczny w GitHub Pages. Nie publikuje tokenu Telegram ani sekretów GitHuba.</p></footer></div>
+<footer><p>Ostatni pełny skan: <b id="scan"></b> · Wygenerowano: <b id="stamp"></b> (czas polski). Odśwież stronę, aby zobaczyć najnowszy opublikowany raport.</p><p>Godziny spotkań są planowanymi terminami z Gamma API (gameStartTime / startTime), wyświetlanymi w strefie Europe/Warsaw, jeśli dostępne. Nigdy nie używamy daty wystawienia rynku jako godziny meczu. „Po starcie” nie potwierdza gry LIVE, a „Archiwum” nie oznacza zweryfikowanego końcowego wyniku. Porównanie stron rynku opiera się wyłącznie na zarejestrowanych BUY: obie strony mogą nie mieć równych danych. Podział na niższe tiery jest heurystyczny. Transakcje bez pełnych metadanych mogą znajdować się w osobnej grupie „Nieznany mecz”.</p><p>Panel jest publiczny w GitHub Pages. Nie publikuje tokenu Telegram ani sekretów GitHuba.</p></footer></div>
 <script>window.__RADAR_DATA__=''' + raw + ''';</script>''' + SCRIPT + '''</body></html>'''
     return html
 

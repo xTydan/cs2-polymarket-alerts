@@ -1,6 +1,6 @@
 {
   "poll_seconds": 25,
-  "discover_seconds": 1200,
+  "discover_seconds": 600,
   "minimum_buy_usd": 1000,
   "absolute_whale_usd": 5000,
   "relative_market_volume": 0.25,
@@ -11,7 +11,7 @@
   "multi_wallet_min_wallets": 3,
   "cluster_window_seconds": 600,
   "alert_cooldown_seconds": 1800,
-  "lookback_seconds": 540,
+  "lookback_seconds": 900,
   "max_pages_per_batch": 30,
   "max_events": 5000,
   "max_market_volume_unknown_usd": 40000,
@@ -71,5 +71,6 @@
   "position_6h_threshold_multiplier": 0.6,
   "position_24h_threshold_multiplier": 0.9,
   "priority_threshold_multiplier": 1.5,
-  "priority_min_usd": 1800
+  "priority_min_usd": 1800,
+  "minimum_event_volume_usd": 100
 }
