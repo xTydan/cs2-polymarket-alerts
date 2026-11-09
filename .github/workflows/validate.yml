@@ -23,3 +23,26 @@ jobs:
         run: python -m py_compile hltv_matches.py hltv_results.py build_dashboard.py github_state.py
       - name: Unit tests
         run: python -m unittest discover -s tests -q
+      - name: Validate generated dashboard JavaScript
+        run: |
+          python -c "from build_dashboard import SCRIPT; open('/tmp/cs2-radar.js','w').write(SCRIPT[len('<script>'):-len('</script>')])"
+          node --check /tmp/cs2-radar.js
+      - name: Real HLTV /matches parser smoke test (read-only)
+        run: |
+          python - <<'PY'
+          import requests
+          from hltv_matches import MATCHES_URL, parse_matches
+          response = requests.get(MATCHES_URL, headers={
+              'User-Agent': 'Mozilla/5.0 (compatible; CS2Radar/1.0)',
+              'Accept': 'text/html',
+          }, timeout=12)
+          response.raise_for_status()
+          matches = parse_matches(response.text)
+          live = sum(m['status'] == 'live' for m in matches)
+          print(f'HLTV /matches: HTTP {response.status_code}; HTML={len(response.content)} B; '
+                f'match-wrapper={response.text.count("match-wrapper")}; '
+                f'parsed={len(matches)}; LIVE={live}')
+          print('Sample:', [(m['teams'], m['status'], m['start']) for m in matches[:5]])
+          if len(matches) < 3:
+              raise SystemExit('Could not parse a credible /matches fixture listing')
+          PY
