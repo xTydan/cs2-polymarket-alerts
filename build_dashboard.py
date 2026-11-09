@@ -136,7 +136,7 @@ def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000,
     hltv_cache = hltv_cache_path or ROOT / 'hltv_results_cache.json'
     match_cache = hltv_matches_cache_path or ROOT / 'hltv_matches_cache.json'
     current_matches = refresh_matches(match_cache, list(hltv_events.values()))
-    hltv_results = {**current_matches, **refresh_hltv(hltv_cache, list(hltv_events.values()))}
+    hltv_results = {**current_matches, **refresh_hltv(hltv_cache, list(hltv_events.values()), current_matches)}
     return {
         'hltvResults': hltv_results,
         'generated':datetime.now(timezone.utc).isoformat(timespec='seconds'),
