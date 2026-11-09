@@ -316,6 +316,21 @@ td .secondary{font-size:12px}
  .kpi .big{font-size:23px}
 }
 
+
+@media(max-width:440px){
+ .fixture-row{grid-template-columns:62px minmax(0,1fr) 15px;gap:9px 8px}
+ .fixture-time{grid-column:1;grid-row:1/3}
+ .fixture-teams{grid-column:2;grid-row:1}
+ .fixture-arrow{grid-column:3;grid-row:1}
+ .fixture-meta{grid-column:2/4;grid-row:2}
+ .fixture-volume{grid-column:2/4;grid-row:3;text-align:left;border-top:1px solid #38536c;padding-top:7px}
+ .fixture-volume .small{display:inline;margin-right:7px}
+ .fixture-sides{grid-column:1/-1;grid-row:4}
+ .fixture-odds{grid-column:2/4;grid-row:5;text-align:left}
+ .fixture-clock{font-size:15px}
+}
+@media(prefers-reduced-motion:reduce){.fixture-row{transition:none}}
+
 </style>'''
 
 SCRIPT = r'''<script>
@@ -711,9 +726,9 @@ if(location.hash.startsWith('#match=')){const key=decodeURIComponent(location.ha
 
 def build_page(data: dict) -> str:
     raw = json.dumps(data, ensure_ascii=False, separators=(',',':')).replace('<','\\u003c').replace('>','\\u003e').replace('&','\\u0026')
-    html = '''<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080d16"><title>CS2 Polymarket Radar v1.11 — analiza przechyleń</title>'''
+    html = '''<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080d16"><title>CS2 Polymarket Radar — analiza zakupów</title>'''
     html += STYLE + '''</head><body><div class="shell">
-<header class="brandbar"><div class="brand"><div class="logo" aria-hidden="true">◎</div><div><h1>CS2 Radar <span class="muted">/ Analiza v1.11</span></h1><div class="small muted">Monitoring napływu zakupów na drużyny · Tier 2/3</div></div></div><div class="status"><span class="bullet"></span>Eksport po skanie GitHub Actions</div></header>
+<header class="brandbar"><div class="brand"><div class="logo" aria-hidden="true">◎</div><div><h1>CS2 Radar <span class="muted">/ Analiza zakupów</span></h1><div class="small muted">Monitoring napływu zakupów na drużyny · Tier 2/3</div></div></div><div class="status"><span class="bullet"></span>Eksport po skanie GitHub Actions</div></header>
 <details class="note disclosures"><summary>ℹ Jak czytać dane radaru? Zakupy BUY ≠ pełny obrót — rozwiń informacje</summary><p>pokazujemy tylko zaobserwowane BUY od progu API (zwykle 100 USD). Kurs na stronie to kurs zaobserwowanego zakupu, nie aktualna oferta. Kwoty i kursy można filtrować po dowolnej wpisanej wartości (np. 500 USD i 1,70). Domyślny filtr pojedynczych zakupów to ≥ 1.20. Analiza przechyleń uwzględnia obie strony bez tego filtra, aby uniknąć sztucznej przewagi. Obrót Polymarket to łączna wartość handlu w wydarzeniu; suma zakupów radaru to osobna, niepełna obserwacja. Rynki ze znanym obrotem poniżej 100 USD są domyślnie wyłączone.</p></details>
 <section class="kpis"><div class="kpi"><div class="hint">Zakupy w filtrze</div><div id="nTrades" class="big">—</div></div><div class="kpi"><div class="hint">Łączna wartość brutto</div><div id="nUSD" class="big">—</div></div><div class="kpi"><div class="hint">Mecze z aktywnością</div><div id="nGames" class="big">—</div></div><div class="kpi"><div class="hint">Portfele</div><div id="nWallets" class="big">—</div></div></section>
 <nav class="tabs" aria-label="Widoki panelu"><button type="button" class="tab active" data-tab="matches">⚔ Mecze</button><button type="button" class="tab" data-tab="pressure">↗ Przechylenia</button><button type="button" class="tab" data-tab="trades">▤ Transakcje</button><button type="button" class="tab" data-tab="positions">▥ Pozycje portfeli</button><button type="button" class="tab" data-tab="wallets">♙ Portfele</button></nav>
@@ -732,7 +747,7 @@ def build_page(data: dict) -> str:
 <select id="sort" aria-label="Sortowanie"><option value="newest" selected>Sortuj: najnowsze</option><option value="largest">Sortuj: największe kwoty</option><option value="odds">Sortuj: najwyższe kursy</option><option value="pressure">Sortuj mecze: przechylenie</option></select>
 <button id="export" type="button">↓ Eksport CSV</button></div>
 <main id="main" aria-live="polite"></main>
-<footer><p>Ostatni pełny skan: <b id="scan"></b> · Wygenerowano: <b id="stamp"></b> (czas polski). Odśwież stronę, aby zobaczyć najnowszy opublikowany raport.</p><p>Godziny spotkań są planowanymi terminami z Gamma API (gameStartTime / startTime), wyświetlanymi w strefie Europe/Warsaw, jeśli dostępne. Nigdy nie używamy daty wystawienia rynku jako godziny meczu. „LIVE” pochodzi z HLTV /matches; „Po starcie” nie potwierdza gry LIVE. „Koniec” oznacza wynik dopasowany z HLTV /results. Terminy mogą się przesuwać; „LIVE?” oznacza prawdopodobne dopasowanie, a „PO PLANIE” nie potwierdza startu. Niezweryfikowany mecz może trafić do archiwum po 48 godzinach od planowanej godziny — to heurystyka, nie oficjalny wynik. Porównanie stron rynku opiera się wyłącznie na zarejestrowanych BUY: obie strony mogą nie mieć równych danych. Podział na niższe tiery jest heurystyczny. Transakcje bez pełnych metadanych mogą znajdować się w osobnej grupie „Nieznany mecz”.</p><p>Przechylenie opisuje wyłącznie zaobserwowane zakupy, nie łączny obrót, prawdopodobieństwo wyniku ani podejrzenie manipulacji. Panel jest publiczny w GitHub Pages. Nie publikuje tokenu Telegram ani sekretów GitHuba.</p></footer></div>
+<footer><p>Ostatni pełny skan: <b id="scan"></b> · Wygenerowano: <b id="stamp"></b> (czas polski). Odśwież stronę, aby zobaczyć najnowszy opublikowany raport.</p><p>Godziny spotkań są planowanymi terminami z Gamma API (gameStartTime / startTime), wyświetlanymi w strefie Europe/Warsaw, jeśli dostępne. Nigdy nie używamy daty wystawienia rynku jako godziny meczu. „LIVE” pochodzi z HLTV /matches; „PO PLANIE” nie potwierdza rozpoczęcia meczu. „Koniec” oznacza wynik dopasowany z HLTV /results. Terminy mogą się przesuwać; „LIVE?” oznacza prawdopodobne dopasowanie, a „PO PLANIE” nie potwierdza startu. Niezweryfikowany mecz może trafić do archiwum po 48 godzinach od planowanej godziny — to heurystyka, nie oficjalny wynik. Porównanie stron rynku opiera się wyłącznie na zarejestrowanych BUY: obie strony mogą nie mieć równych danych. Podział na niższe tiery jest heurystyczny. Transakcje bez pełnych metadanych mogą znajdować się w osobnej grupie „Nieznany mecz”.</p><p>Przechylenie opisuje wyłącznie zaobserwowane zakupy, nie łączny obrót, prawdopodobieństwo wyniku ani podejrzenie manipulacji. Panel jest publiczny w GitHub Pages. Nie publikuje tokenu Telegram ani sekretów GitHuba.</p></footer></div>
 <script>window.__RADAR_DATA__=''' + raw + ''';</script>''' + SCRIPT + '''</body></html>'''
     return html
 
