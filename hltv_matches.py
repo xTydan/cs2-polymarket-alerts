@@ -213,6 +213,12 @@ def refresh_matches(cache_path: Path, events: list[dict]) -> dict:
         )
         live = sum(f["status"] == "live" for f in fixtures)
         print(f"HLTV /matches: {len(fixtures)} meczow ({live} LIVE), {len(matched)} dopasowanych.")
+        matched_urls = {row["url"] for row in matched.values()}
+        missed_live = ["/".join(fixture["teams"]) for fixture in fixtures
+                       if fixture["status"] == "live" and fixture["url"] not in matched_urls]
+        if missed_live:
+            print("HLTV /matches: LIVE bez dopasowania do Polymarket: "
+                  + ", ".join(missed_live[:8]))
     except (requests.RequestException, ValueError, OSError) as err:
         print(f"HLTV /matches: brak wiarygodnego terminarza ({type(err).__name__}: {str(err)[:160]}).")
         # Freshness is checked by the dashboard. Don't claim ended from failed requests.
