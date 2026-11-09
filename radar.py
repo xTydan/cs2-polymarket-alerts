@@ -22,6 +22,8 @@ from typing import Any
 
 import requests
 
+from market_flow import assess_market_flow, BASELINE_SECONDS
+
 BASE = Path(__file__).resolve().parent
 GAMMA = "https://gamma-api.polymarket.com"
 DATA = "https://data-api.polymarket.com"
@@ -106,6 +108,15 @@ DEFAULT = {
     "position_24h_threshold_multiplier": 0.90,
     "priority_threshold_multiplier": 1.50,
     "priority_min_usd": 1800,
+    "flow_enabled": True,
+    "flow_window_seconds": 900,
+    "flow_min_buy_usd": 2500,
+    "flow_min_wallets": 3,
+    "flow_min_share": 0.80,
+    "flow_burst_multiplier": 4.0,
+    "flow_baseline_min_usd": 500,
+    "flow_priority_cooldown_seconds": 3600,
+    "flow_normal_cooldown_seconds": 3600,
 }
 
 
@@ -193,6 +204,16 @@ def load_config(path: Path) -> dict:
         raise ValueError("alert_odds_bands musi byc posortowane po min_odds")
     if float(bands[0]['min_odds']) > float(config['alert_min_odds']):
         raise ValueError("alert_odds_bands musi zawierac prog nie wyzszy niz alert_min_odds")
+    if not 300 <= int(config["flow_window_seconds"]) <= 3600:
+        raise ValueError("flow_window_seconds musi być 300..3600")
+    if not 0.50 < number(config["flow_min_share"]) <= 1:
+        raise ValueError("flow_min_share musi być w zakresie (0.5,1]")
+    if int(config["flow_min_wallets"]) < 2:
+        raise ValueError("flow_min_wallets musi być co najmniej 2")
+    for key in ("flow_min_buy_usd", "flow_burst_multiplier", "flow_baseline_min_usd",
+                "flow_priority_cooldown_seconds", "flow_normal_cooldown_seconds"):
+        if number(config[key]) <= 0:
+            raise ValueError(f"{key} musi być dodatnie")
     for key in ('unknown_tier_threshold_multiplier', 'position_6h_threshold_multiplier',
                 'position_24h_threshold_multiplier','priority_threshold_multiplier','priority_min_usd'):
         if number(config[key]) <= 0:
@@ -496,6 +517,59 @@ class Database:
         count, usd, wallets, shares = self.conn.execute(query, args).fetchone()
         return int(count), float(usd), int(wallets), float(shares) / float(usd) if usd else 0.0
 
+    def market_flow_trades(self, condition_id: str, since: int, until: int) -> list[tuple]:
+        """Unique recorded BUY fills in one exact market; PK dedup."""
+        return self.conn.execute(
+            """SELECT timestamp, outcome, wallet, usd, price FROM trades
+               WHERE condition_id=? AND timestamp>=? AND timestamp<=?
+               ORDER BY timestamp, id""", (condition_id, since, until)
+        ).fetchall()
+
+    def observed_buy_summary(self, condition_id: str, outcome: str, since: int, until: int) -> tuple:
+        """Real recorded buys, not accumulated signal_candidate.usd values."""
+        n, amount, wallets, shares = self.conn.execute(
+            """SELECT COUNT(*), COALESCE(SUM(usd),0),
+                      COUNT(DISTINCT NULLIF(wallet,'')), COALESCE(SUM(usd/price),0)
+               FROM trades WHERE condition_id=? AND outcome=?
+               AND timestamp>=? AND timestamp<?""",
+            (condition_id, outcome, since, until)
+        ).fetchone()
+        return int(n), float(amount), int(wallets), float(shares) / float(amount) if amount else 0.0
+
+    def recently_alerted_market(self, condition_id: str, outcome: str, now: int,
+                                seconds: int = 15 * 60) -> bool:
+        """Suppress duplicate flow urgency after a priority trade/cluster alert."""
+        prefix = f"priority:{condition_id}:"
+        multi = f"priority-multi:{condition_id}:{outcome}"
+        suffix = f":{outcome}"
+        rows = list(self.conn.execute(
+            "SELECT key FROM cooldowns WHERE sent_at>=?", (now - seconds,)
+        )) + list(self.conn.execute("SELECT key FROM outbox WHERE key LIKE 'priority%'"))
+        return any(key == multi or (key.startswith(prefix) and key.endswith(suffix))
+                   for (key,) in rows)
+
+    def queue_market_flow_signal(self, condition_id: str, outcome: str,
+                                 now: int, cooldown: int, avg_odds: float) -> bool:
+        """Only a marker for digest; monetary totals come from raw trades."""
+        key = f"normal-flow:{condition_id}:{outcome}"
+        synthetic_id = "flow:" + hashlib.sha256(
+            f"{condition_id}|{outcome}|{now // 900}".encode("utf-8")
+        ).hexdigest()
+        with self.conn:
+            last = self.conn.execute(
+                "SELECT last_at FROM signal_throttle WHERE key=?", (key,)
+            ).fetchone()
+            if last and now - int(last[0]) < cooldown:
+                return False
+            self.conn.execute("INSERT OR REPLACE INTO signal_throttle VALUES (?,?)", (key, now))
+            self.conn.execute(
+                """INSERT OR IGNORE INTO signal_candidates
+                   (id,created_at,condition_id,outcome,wallet,kind,usd,batch_key,avg_odds)
+                   VALUES (?,?,?,?,'','flow',0,'',?)""",
+                (synthetic_id, now, condition_id, outcome, avg_odds)
+            )
+        return True
+
     def can_alert(self, key: str, now: int, cooldown: int) -> bool:
         pending = self.conn.execute("SELECT 1 FROM outbox WHERE key=?", (key,)).fetchone()
         if pending:
@@ -546,7 +620,7 @@ class Database:
                 VALUES (?,?,?,?,?,?,?,'',?)""",
                 (trade['id'], now, trade['condition_id'], trade['outcome'],
                  trade.get('wallet') or '', kind,
-                 float(total_usd if total_usd is not None else trade['usd']),
+                 float(trade['usd']),  # store the actual BUY, never a cumulative position
                  float(avg_odds if avg_odds is not None else 1 / trade['price'])))
             return True
 
@@ -558,7 +632,8 @@ class Database:
 
     def pending_normal_signals(self) -> list[tuple]:
         return self.conn.execute("""SELECT s.condition_id, s.outcome, s.kind, s.usd,
-            COALESCE(i.title,'Nieznany mecz'), COALESCE(i.slug,''), s.wallet, s.avg_odds
+            COALESCE(i.title,'Nieznany mecz'), COALESCE(i.slug,''), s.wallet, s.avg_odds,
+            COALESCE(i.market_title,''), s.created_at
             FROM signal_candidates s
             LEFT JOIN trade_market_info i ON i.condition_id=s.condition_id
             WHERE s.batch_key='' ORDER BY s.created_at, s.id""").fetchall()
@@ -595,6 +670,7 @@ class Radar:
         self.alerts_queued = 0
         self.normal_signals_queued = 0
         self.daily_reports_queued = 0
+        self.flow_conditions: set[str] = set()
         self.last_discovery = 0.0
         self.csv_path = BASE / "alerty.csv"
         self.cache_path = BASE / "market_cache.json"
@@ -973,7 +1049,85 @@ class Radar:
     def wallet_short(wallet: str) -> str:
         return wallet[:8] + "…" + wallet[-4:] if len(wallet) >= 16 else (wallet or "brak")
 
+    def market_flow_message(self, market: EventMarket, flow: dict) -> str:
+        """Actionable alert with explicit denominator and no manipulation claims."""
+        escape = html.escape
+        burst = flow["burst_ratio"]
+        delta = flow["delta_pp"]
+        heading = "🚨 NAGŁE PRZECHYLENIE ZAKUPÓW BUY — CS2"
+        lines = [
+            f"<b>{heading}</b>",
+            f"🎮 <b>{escape(market.title)}</b>",
+            f"🎯 Rynek: <b>{escape(market.market_title)}</b>",
+            f"📌 Strona: <b>{escape(flow['outcome'])}</b>",
+            f"💵 Zakupy BUY w ostatnich {flow['window_minutes']} min: "
+            f"<b>{flow['amount']:,.2f} USD</b> na tę stronę / "
+            f"{flow['total']:,.2f} USD na cały rynek",
+            f"⚖️ Udział obserwowanych zakupów: <b>{flow['share']*100:.0f}%</b>",
+            f"👛 {flow['wallets']} portfeli po tej stronie, {flow['buys']} zakupów",
+            f"🔎 Największy portfel: {flow['top_wallet_share']*100:.0f}% zakupów strony",
+            f"📈 Średni kurs kupna (ważony udziałami): ≈ {flow['avg_odds']:.2f}",
+        ]
+        if burst is not None:
+            lines.append(f"⚡ Tempo zakupów całego rynku: {burst:.1f}× vs poprzednie {flow['baseline_minutes']} min")
+        else:
+            lines.append("⚡ Zbyt mało wcześniejszych zakupów do porównania tempa")
+        if delta is not None:
+            lines.append(f"📊 Zmiana udziału strony: {delta:+.0f} pp vs wcześniejsze obserwacje")
+        lines.extend([
+            f"🔗 <a href=\"{escape(market.link, quote=True)}\">Polymarket: otwórz rynek</a>",
+            "",
+            "ℹ️ To wyłącznie zaobserwowane zakupy BUY od progu radaru. "
+            "Nie są to pozycje netto, pełny obrót rynku ani dowód manipulacji.",
+        ])
+        return "\n".join(lines)
+
+    def market_flow_alerts(self, now: int) -> None:
+        """Evaluate each changed condition once per scan; avoid whale-duplicate spam."""
+        conditions = sorted(self.flow_conditions)
+        self.flow_conditions.clear()
+        if not self.cfg["flow_enabled"]:
+            return
+        for condition_id in conditions:
+            market = self.markets.get(condition_id)
+            if not market or market.event_closed:
+                continue
+            rows = self.db.market_flow_trades(condition_id, now - BASELINE_SECONDS, now + 5)
+            flows = assess_market_flow(
+                rows, market.outcomes, now,
+                min_buy_usd=number(self.cfg["flow_min_buy_usd"]),
+                minimum_wallets=int(self.cfg["flow_min_wallets"]),
+                min_share=number(self.cfg["flow_min_share"]),
+                burst_multiplier=number(self.cfg["flow_burst_multiplier"]),
+                baseline_min_usd=number(self.cfg["flow_baseline_min_usd"]),
+                window_seconds=int(self.cfg["flow_window_seconds"]),
+            )
+            for flow in flows:
+                outcome = flow["outcome"]
+                if self.db.recently_alerted_market(condition_id, outcome, now):
+                    LOG.info("FLOW: istnieje świeży alert priorytetowy, nie duplikuję %s / %s",
+                             market.market_title, outcome)
+                    continue
+                key = f"market-flow:{condition_id}:{outcome}"
+                if flow["urgent"]:
+                    if self.db.can_alert(key, now, int(self.cfg["flow_priority_cooldown_seconds"])):
+                        self.db.queue_alert(key, now, self.market_flow_message(market, flow), [])
+                        self.alerts_queued += 1
+                        LOG.info("FLOW PILNE: %s / %s | %.0f USD | %.0f%% | %d portfeli",
+                                 market.market_title, outcome, flow["amount"],
+                                 flow["share"] * 100, flow["wallets"])
+                    continue
+                if self.db.queue_market_flow_signal(
+                    condition_id, outcome, now,
+                    int(self.cfg["flow_normal_cooldown_seconds"]), flow["avg_odds"]
+                ):
+                    self.normal_signals_queued += 1
+                    LOG.info("FLOW DO RAPORTU: %s / %s | %.0f USD | %.0f%% | %d portfeli",
+                             market.market_title, outcome, flow["amount"],
+                             flow["share"] * 100, flow["wallets"])
+
     def normal_digest(self, now: int) -> bool:
+        """Group signal markers by exact market+outcome; sum each stored BUY once."""
         rows = self.db.pending_normal_signals()
         if not rows:
             return False
@@ -981,33 +1135,54 @@ class Radar:
         if last and now - last < int(self.cfg["normal_digest_interval_seconds"]):
             LOG.info("DIGEST: oczekuje %d sygnalow do nastepnej paczki", len(rows))
             return False
-        grouped: dict[tuple, dict] = {}
-        for condition, outcome, kind, usd, title, slug, wallet, avg_odds in rows:
-            key = (condition, outcome)
-            entry = grouped.setdefault(key, {"title": title, "outcome": outcome,
-                                             "slug": slug, "usd": 0., "shares": 0., "n": 0, "wallets": set()})
-            entry["usd"] += float(usd)
-            entry["shares"] += float(usd) * float(avg_odds)
-            entry["n"] += 1
-            if wallet:
-                entry["wallets"].add(wallet)
-        ranked = sorted(grouped.values(), key=lambda v: (-v["usd"], -v["n"]))
-        lines = [f"📋 <b>CS2 RADAR — ZBIORCZE SYGNAŁY ({len(rows)})</b>",
-                 "Zebrane sygnały dużych zakupów od poprzedniego raportu. Nie są to wszystkie zakupy rynku.", ""]
+        # Consecutive digest windows do not overlap. When starting without a
+        # prior digest, use at most an hour of recently observed purchases.
+        since = max(now - 6 * 3600, last + 1 if last else now - 3600)
+        window_minutes = max(1, (now - since + 59) // 60)
+        grouped: dict[tuple[str, str], dict] = {}
+        for condition, outcome, kind, _usd, title, slug, _wallet, _avg_odds, market_title, _created in rows:
+            group = grouped.setdefault((condition, outcome), {
+                "condition": condition, "outcome": outcome, "title": title,
+                "market_title": market_title, "slug": slug, "kinds": set(), "signals": 0,
+            })
+            group["kinds"].add(kind)
+            group["signals"] += 1
+        ranked = []
+        for entry in grouped.values():
+            n, amount, wallets, avg_odds = self.db.observed_buy_summary(
+                entry["condition"], entry["outcome"], since, now + 1
+            )
+            entry.update({"buys": n, "usd": amount, "wallets": wallets, "avg_odds": avg_odds})
+            ranked.append(entry)
+        ranked.sort(key=lambda entry: (-entry["usd"], -entry["signals"], entry["title"]))
+        lines = [
+            f"📋 <b>CS2 RADAR — RAPORT ZAKUPÓW ({len(rows)} sygn.)</b>",
+            f"Unikalne zaobserwowane zakupy BUY w oknie około {window_minutes} min, "
+            "pogrupowane po konkretnym rynku i stronie.",
+            "",
+        ]
         for ix, entry in enumerate(ranked[:int(self.cfg["normal_digest_top_n"])], 1):
-            lines.append(f"<b>{ix}. {html.escape(str(entry['outcome'])[:45])}</b> — ${entry['usd']:,.0f}")
-            lines.append(f"🎮 {html.escape(str(entry['title'])[:80])} · kurs śr. ≈ {entry['shares']/entry['usd']:.2f}")
-            lines.append(f"{entry['n']} sygn., {len(entry['wallets'])} portfeli")
-            slug = str(entry['slug'])
+            label = "📊 PRZECHYLENIE" if "flow" in entry["kinds"] else "💰 ZAKUPY"
+            lines.append(f"<b>{ix}. {label}: {html.escape(str(entry['outcome'])[:45])}</b> "
+                         f"— {entry['usd']:,.0f} USD")
+            lines.append(f"🎮 {html.escape(str(entry['title'])[:70])}")
+            if entry["market_title"]:
+                lines.append(f"🎯 {html.escape(str(entry['market_title'])[:70])}")
+            lines.append(f"🔎 {entry['buys']} zakupów, {entry['wallets']} portfeli"
+                         + (f", średni kurs ≈ {entry['avg_odds']:.2f}" if entry["buys"] else ""))
+            slug = str(entry["slug"])
             if re.fullmatch(r"[A-Za-z0-9_-]{1,180}", slug):
-                lines.append(f'<a href="https://polymarket.com/event/{slug}">Otwórz mecz</a>')
+                lines.append(f'<a href="https://polymarket.com/event/{slug}">Otwórz rynek</a>')
+            if len("\n".join(lines)) > 3200:
+                break
+            lines.append("")
         if len(ranked) > int(self.cfg["normal_digest_top_n"]):
-            lines.append(f"\n… i {len(ranked) - int(self.cfg['normal_digest_top_n'])} innych rynków / wyników.")
-        lines.append("\nℹ️ Kwoty to zakupy kwalifikujących się sygnałów, nie stan portfeli. Duże zakupy priorytetowe mają osobne alerty.")
-        # Telegram HTML max 4096 znaków. Utrzymuj bezpieczny margines.
+            lines.append(f"… i {len(ranked) - int(self.cfg['normal_digest_top_n'])} pozostałych kombinacji rynku i strony.")
+        lines.append("ℹ️ Kwoty to pojedynczo policzone zakupy BUY z bazy, nie sumy pozycji 6/24h. "
+                     "Brak sprzedaży, drobnych transakcji i pełnego orderbooka.")
         message = "\n".join(lines)
         if len(message) > 3750:
-            message = "\n".join(lines[:3] + lines[3:12] + ["… więcej sygnałów w panelu."])
+            message = "\n".join(lines[:3] + ["Szczegóły i wszystkie zakupy dostępne na stronie radaru."])
         if self.dry_run:
             LOG.info("DRY-RUN digest: %d sygnalow (bez wysylania na Telegram)", len(rows))
             with self.db.conn:
@@ -1017,7 +1192,8 @@ class Radar:
                                      ("last_normal_digest", str(now)))
             return True
         queued = self.db.queue_normal_digest(now, message)
-        LOG.info("DIGEST: dodano raport z %d sygnalami w %d wynikach", queued, len(grouped))
+        LOG.info("DIGEST: %d sygnalow, %d kombinacji rynku/wyniku, %d minut",
+                 queued, len(ranked), window_minutes)
         return bool(queued)
 
     def daily_summary(self, now: int) -> bool:
@@ -1067,6 +1243,7 @@ class Radar:
         if not self.db.add_trade(trade):
             return False
         self.db.remember_market(m)
+        self.flow_conditions.add(trade["condition_id"])
         now = int(time.time())
         odds = 1.0 / trade['price']
         minimum_odds = number(self.cfg['alert_min_odds'])
@@ -1195,6 +1372,7 @@ class Radar:
                 coverage_complete = False
         if coverage_complete:
             self.db.set_meta("last_successful_poll", str(now))
+        self.market_flow_alerts(now)
         self.normal_digest(now)
         self.daily_summary(now)
         self.db.cleanup(now)
