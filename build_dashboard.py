@@ -218,6 +218,119 @@ a{color:#90d5ff}button,input,select{font:inherit}button{cursor:pointer}button:fo
 .sort-head:hover{color:#8ad4ff}.sort-head[aria-pressed="true"]{color:#8de9d1}
 .sort-arrow{font-size:11px;min-width:10px}
 @media(max-width:680px){.flow-grid{grid-template-columns:1fr;padding:9px}.pressure-controls{padding:10px}.pressure-controls select{flex:1 1 120px}.flow-teaser-grid{grid-template-columns:1fr}}
+
+/* Readability: stronger contrast, larger figures, visible BUY sides on mobile. */
+:root{--fg:#f4f8ff;--dim:#bdcfe4;--edge:#3a536e;--blue:#85d3ff;--mint:#96f0cf}
+body{font-size:15px;line-height:1.56}
+.shell{max-width:1740px;padding:26px 25px 72px}
+.small,.count,.kpi .hint,.detail-meta{font-size:13px}
+.kpi .big{font-size:28px}
+.note{font-size:13px}.disclosures{padding:0 15px}.disclosures summary{cursor:pointer;padding:12px 0;font-weight:700;color:#dcefff}.disclosures p{margin:0;padding:0 0 13px}
+.toolbar input,.toolbar select,.fixture-select{border-color:#4a6683}
+.fixture-layout{grid-template-columns:240px minmax(0,1fr);gap:18px}
+.fixture-sidebar{background:#132438;border-color:#415b79}
+.fixture-stage{font-size:14px;color:#e2edf9}
+.fixture-stage.active{background:#214b70;border-color:#6daedd}
+.fixture-aside-note{font-size:12px}
+.fixture-main-head h2{font-size:22px}
+.fixtures-section-head{margin-top:16px}
+.fixtures-toggle{min-height:46px;background:#182d46;border:1px solid #3d5773}
+.fixtures-toggle:hover{background:#21405e;border-color:#73b1e4}
+.fixtures-toggle-label{font-size:15px}
+.fixture-column-head,.fixture-row{grid-template-columns:90px minmax(175px,1.3fr) minmax(155px,1.05fr) minmax(195px,1.18fr) minmax(145px,.9fr) 82px 16px;gap:11px}
+.fixture-column-head{display:grid;align-items:center;padding:10px 15px;background:#1d314c;color:#cfe3f7;font-size:11px;font-weight:800;letter-spacing:.04em}
+.fixture-list{border-color:#3d526d;background:#132137}
+.fixture-row{min-height:100px;padding:15px;border-top:1px solid #39516d;row-gap:9px}
+.fixture-row:hover{background:#203e5b}
+.fixture-row:focus-visible{outline:3px solid #85d3ff;outline-offset:-4px}
+.fixture-clock{font-size:18px}
+.fixture-time{padding-right:9px;border-right-color:#526b85}
+.fixture-when{display:inline-flex;justify-content:center;align-items:center;font-size:11px;padding:4px 5px;line-height:1.12;border:1px solid #61748c;border-radius:5px;background:#26394f;margin-top:6px}
+.fixture-when.live{background:#581b33;border-color:#e6789b;color:#ffeaf0}
+.fixture-when.possible{background:#584221;border-color:#d1a458;color:#ffe1aa}
+.fixture-when.upcoming{background:#164039;border-color:#4aa893;color:#b8ffe6}
+.fixture-when.started{background:#43351e;border-color:#aa8944;color:#ffe1aa}
+.fixture-when.archive{background:#29364a;border-color:#77869a;color:#e0e9f3}
+.fixture-teams,.fixture-team{font-size:15px}
+.fixture-team{font-weight:770;line-height:1.4}
+.fixture-team+.fixture-team{margin-top:3px}
+.fixture-league{font-size:13px;color:#d6e6f9;white-space:normal;line-height:1.35}
+.fixture-tags{gap:6px;margin-top:8px}
+.tiny-label,.pill{font-size:12px;padding:3px 7px}
+.side-caption{font-size:12px;color:#c6d5e7}
+.side-value{font-size:15px;font-weight:800;color:#a2f6d6}
+.fixture-total{font-size:17px}
+.fixture-volume .small{font-size:12px;line-height:1.35;margin-top:3px}
+.fixture-odds{font-size:13px;font-weight:750;color:#ffdb9f}
+.fixture-day{font-size:12px;padding:9px 15px}
+.flow-card{padding:15px;background:#192e47;border-color:#47688a}
+.flow-head{font-size:14px}.flow-sub{font-size:13px}
+.flow-notes{font-size:12px;color:#c7d7e9}
+.flow-bar{height:9px}.flow-pct{font-size:13px}
+.market-activity-note{font-size:13px}.market-activity-note strong{font-size:14px}
+.detail-head h2{font-size:23px}.detail-controls select{padding:12px}
+table th{font-size:12px;color:#d9e7f6;background:#1a2e47}
+table td{font-size:13px;line-height:1.55}
+table tbody tr:nth-child(even){background:rgba(37,59,82,.33)}
+table tbody tr:hover{background:#254461}
+td .secondary{font-size:12px}
+@media(min-width:671px) and (max-width:1360px){
+ .fixture-column-head{display:none}
+ .fixture-layout{grid-template-columns:205px minmax(0,1fr)}
+ .fixture-row{grid-template-columns:82px minmax(148px,1.35fr) minmax(128px,1fr) minmax(135px,.9fr) 16px;gap:10px}
+ .fixture-time{grid-column:1;grid-row:1/3}
+ .fixture-teams{grid-column:2;grid-row:1}
+ .fixture-meta{grid-column:3;grid-row:1}
+ .fixture-sides{grid-column:2/4;grid-row:2;display:grid}
+ .fixture-volume{grid-column:4;grid-row:1}
+ .fixture-odds{grid-column:4;grid-row:2;display:block;text-align:right}
+ .fixture-arrow{grid-column:5;grid-row:1;align-self:center}
+}
+@media(max-width:880px){
+ .shell{padding:17px 12px 42px}
+ .fixture-layout{display:block}
+ .fixture-sidebar{position:static}
+ .fixture-sidebar .fixture-aside-note{display:block;flex-basis:100%;margin:8px 0}
+}
+@media(max-width:670px){
+ .shell{padding:14px 9px 40px}
+ .fixture-main-head h2{font-size:19px}
+ .fixture-row{grid-template-columns:68px minmax(0,1fr) minmax(106px,.8fr) 15px;gap:9px 7px;padding:12px 9px}
+ .fixture-time{grid-column:1;grid-row:1/3;padding-right:5px}
+ .fixture-clock{font-size:16px}
+ .fixture-when{font-size:10px;padding:3px 4px}
+ .fixture-teams{grid-column:2;grid-row:1}
+ .fixture-team{font-size:14px}
+ .fixture-volume{grid-column:3;grid-row:1;text-align:right}
+ .fixture-total{font-size:14px;white-space:normal;overflow-wrap:anywhere}
+ .fixture-volume .small{font-size:11px}
+ .fixture-arrow{grid-column:4;grid-row:1}
+ .fixture-meta{grid-column:2/4;grid-row:2}
+ .fixture-league{font-size:12px}
+ .fixture-sides{grid-column:1/-1;grid-row:3;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;padding:9px;border-radius:8px;border:1px solid #375979;background:#182e46}
+ .side-caption{font-size:11px;white-space:normal;line-height:1.35}
+ .side-value{font-size:14px;white-space:normal;overflow-wrap:anywhere;margin-top:4px}
+ .fixture-odds{grid-column:2/4;grid-row:4;text-align:right;display:block}
+ .fixture-day{font-size:11px}
+ .detail-head h2{font-size:19px}
+ .kpi .big{font-size:23px}
+}
+
+
+@media(max-width:440px){
+ .fixture-row{grid-template-columns:62px minmax(0,1fr) 15px;gap:9px 8px}
+ .fixture-time{grid-column:1;grid-row:1/3}
+ .fixture-teams{grid-column:2;grid-row:1}
+ .fixture-arrow{grid-column:3;grid-row:1}
+ .fixture-meta{grid-column:2/4;grid-row:2}
+ .fixture-volume{grid-column:2/4;grid-row:3;text-align:left;border-top:1px solid #38536c;padding-top:7px}
+ .fixture-volume .small{display:inline;margin-right:7px}
+ .fixture-sides{grid-column:1/-1;grid-row:4}
+ .fixture-odds{grid-column:2/4;grid-row:5;text-align:left}
+ .fixture-clock{font-size:15px}
+}
+@media(prefers-reduced-motion:reduce){.fixture-row{transition:none}}
+
 </style>'''
 
 SCRIPT = r'''<script>
@@ -491,6 +604,9 @@ function showMatches(rows){
  heading.append(toggleSection);content.append(heading);
  let shown=0,lastDay='';const list=mk('div','fixture-list');list.id='fixtures-'+key;
  if(!expanded){list.hidden=true;content.append(list);continue;}
+ const colHead=mk('div','fixture-column-head');
+ for(const label of ['GODZINA','DRUŻYNY','TURNIEJ / RYNKI','ZAKUPY BUY','OBRÓT PM','MAX KURS',''])colHead.append(mk('span','',label));
+ list.append(colHead);
  for(const x of group){if(shown>=displayLimit)break;shown++;
  const day=x.e.start?dateFmt.format(x.e.start*1000):'';if(day&&day!==lastDay){lastDay=day;const h=mk('div','fixture-day',dayFmt.format(x.e.start*1000));list.append(h)}
  list.append(fixtureRow(x))}
@@ -610,10 +726,10 @@ if(location.hash.startsWith('#match=')){const key=decodeURIComponent(location.ha
 
 def build_page(data: dict) -> str:
     raw = json.dumps(data, ensure_ascii=False, separators=(',',':')).replace('<','\\u003c').replace('>','\\u003e').replace('&','\\u0026')
-    html = '''<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080d16"><title>CS2 Polymarket Radar v1.11 — analiza przechyleń</title>'''
+    html = '''<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080d16"><title>CS2 Polymarket Radar — analiza zakupów</title>'''
     html += STYLE + '''</head><body><div class="shell">
-<header class="brandbar"><div class="brand"><div class="logo" aria-hidden="true">◎</div><div><h1>CS2 Radar <span class="muted">/ Analiza v1.11</span></h1><div class="small muted">Monitoring napływu zakupów na drużyny · Tier 2/3</div></div></div><div class="status"><span class="bullet"></span>Eksport po skanie GitHub Actions</div></header>
-<div class="note"><b>Uwaga:</b> pokazujemy tylko zaobserwowane BUY od progu API (zwykle 100 USD). Kurs na stronie to kurs zaobserwowanego zakupu, nie aktualna oferta. Kwoty i kursy można filtrować po dowolnej wpisanej wartości (np. 500 USD i 1,70). Domyślny filtr pojedynczych zakupów to ≥ 1.20. Analiza przechyleń uwzględnia obie strony bez tego filtra, aby uniknąć sztucznej przewagi. Obrót Polymarket to łączna wartość handlu w wydarzeniu; suma zakupów radaru to osobna, niepełna obserwacja. Rynki ze znanym obrotem poniżej 100 USD są domyślnie wyłączone.</div>
+<header class="brandbar"><div class="brand"><div class="logo" aria-hidden="true">◎</div><div><h1>CS2 Radar <span class="muted">/ Analiza zakupów</span></h1><div class="small muted">Monitoring napływu zakupów na drużyny · Tier 2/3</div></div></div><div class="status"><span class="bullet"></span>Eksport po skanie GitHub Actions</div></header>
+<details class="note disclosures"><summary>ℹ Jak czytać dane radaru? Zakupy BUY ≠ pełny obrót — rozwiń informacje</summary><p>pokazujemy tylko zaobserwowane BUY od progu API (zwykle 100 USD). Kurs na stronie to kurs zaobserwowanego zakupu, nie aktualna oferta. Kwoty i kursy można filtrować po dowolnej wpisanej wartości (np. 500 USD i 1,70). Domyślny filtr pojedynczych zakupów to ≥ 1.20. Analiza przechyleń uwzględnia obie strony bez tego filtra, aby uniknąć sztucznej przewagi. Obrót Polymarket to łączna wartość handlu w wydarzeniu; suma zakupów radaru to osobna, niepełna obserwacja. Rynki ze znanym obrotem poniżej 100 USD są domyślnie wyłączone.</p></details>
 <section class="kpis"><div class="kpi"><div class="hint">Zakupy w filtrze</div><div id="nTrades" class="big">—</div></div><div class="kpi"><div class="hint">Łączna wartość brutto</div><div id="nUSD" class="big">—</div></div><div class="kpi"><div class="hint">Mecze z aktywnością</div><div id="nGames" class="big">—</div></div><div class="kpi"><div class="hint">Portfele</div><div id="nWallets" class="big">—</div></div></section>
 <nav class="tabs" aria-label="Widoki panelu"><button type="button" class="tab active" data-tab="matches">⚔ Mecze</button><button type="button" class="tab" data-tab="pressure">↗ Przechylenia</button><button type="button" class="tab" data-tab="trades">▤ Transakcje</button><button type="button" class="tab" data-tab="positions">▥ Pozycje portfeli</button><button type="button" class="tab" data-tab="wallets">♙ Portfele</button></nav>
 <div class="toolbar"><input id="search" type="search" placeholder="Mecz, drużyna, turniej, portfel…" aria-label="Szukaj">
@@ -631,7 +747,7 @@ def build_page(data: dict) -> str:
 <select id="sort" aria-label="Sortowanie"><option value="newest" selected>Sortuj: najnowsze</option><option value="largest">Sortuj: największe kwoty</option><option value="odds">Sortuj: najwyższe kursy</option><option value="pressure">Sortuj mecze: przechylenie</option></select>
 <button id="export" type="button">↓ Eksport CSV</button></div>
 <main id="main" aria-live="polite"></main>
-<footer><p>Ostatni pełny skan: <b id="scan"></b> · Wygenerowano: <b id="stamp"></b> (czas polski). Odśwież stronę, aby zobaczyć najnowszy opublikowany raport.</p><p>Godziny spotkań są planowanymi terminami z Gamma API (gameStartTime / startTime), wyświetlanymi w strefie Europe/Warsaw, jeśli dostępne. Nigdy nie używamy daty wystawienia rynku jako godziny meczu. „LIVE” pochodzi z HLTV /matches; „Po starcie” nie potwierdza gry LIVE. „Koniec” oznacza wynik dopasowany z HLTV /results. Gdy brak potwierdzenia HLTV, niektóre mecze trafiają do archiwum na podstawie czasu (BO1 po 2,5 h, BO3 po 4,5 h, BO5 po 7 h) — to ostrożna heurystyka, nie oficjalny wynik. Porównanie stron rynku opiera się wyłącznie na zarejestrowanych BUY: obie strony mogą nie mieć równych danych. Podział na niższe tiery jest heurystyczny. Transakcje bez pełnych metadanych mogą znajdować się w osobnej grupie „Nieznany mecz”.</p><p>Przechylenie opisuje wyłącznie zaobserwowane zakupy, nie łączny obrót, prawdopodobieństwo wyniku ani podejrzenie manipulacji. Panel jest publiczny w GitHub Pages. Nie publikuje tokenu Telegram ani sekretów GitHuba.</p></footer></div>
+<footer><p>Ostatni pełny skan: <b id="scan"></b> · Wygenerowano: <b id="stamp"></b> (czas polski). Odśwież stronę, aby zobaczyć najnowszy opublikowany raport.</p><p>Godziny spotkań są planowanymi terminami z Gamma API (gameStartTime / startTime), wyświetlanymi w strefie Europe/Warsaw, jeśli dostępne. Nigdy nie używamy daty wystawienia rynku jako godziny meczu. „LIVE” pochodzi z HLTV /matches; „PO PLANIE” nie potwierdza rozpoczęcia meczu. „Koniec” oznacza wynik dopasowany z HLTV /results. Terminy mogą się przesuwać; „LIVE?” oznacza prawdopodobne dopasowanie, a „PO PLANIE” nie potwierdza startu. Niezweryfikowany mecz może trafić do archiwum po 48 godzinach od planowanej godziny — to heurystyka, nie oficjalny wynik. Porównanie stron rynku opiera się wyłącznie na zarejestrowanych BUY: obie strony mogą nie mieć równych danych. Podział na niższe tiery jest heurystyczny. Transakcje bez pełnych metadanych mogą znajdować się w osobnej grupie „Nieznany mecz”.</p><p>Przechylenie opisuje wyłącznie zaobserwowane zakupy, nie łączny obrót, prawdopodobieństwo wyniku ani podejrzenie manipulacji. Panel jest publiczny w GitHub Pages. Nie publikuje tokenu Telegram ani sekretów GitHuba.</p></footer></div>
 <script>window.__RADAR_DATA__=''' + raw + ''';</script>''' + SCRIPT + '''</body></html>'''
     return html
 
