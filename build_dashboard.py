@@ -10,12 +10,14 @@ from pathlib import Path
 import re
 import sqlite3
 
+from hltv_results import refresh as refresh_hltv
+
 ROOT = Path(__file__).resolve().parent
 VALID_SLUG = re.compile(r"^[A-Za-z0-9_-]{1,180}$")
 VALID_WALLET = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
 
-def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000) -> dict:
+def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000, hltv_cache_path: Path | None = None) -> dict:
     con = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     try:
@@ -116,7 +118,18 @@ def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000) -> dict:
     view_markets = [m for m in markets.values()
                     if m['c'] in used or m['c'] in cached]
     view_markets.sort(key=lambda m:(m['m'],m['q']))
+    # Each event corresponds to the dashboard's slug-or-title key.
+    hltv_events = {}
+    for m in view_markets:
+        key = str(m['s'] or (m['m'] if not m['m'].startswith('Nieznany mecz') else m['c'])).lower()
+        entry = hltv_events.setdefault(key, {'key': key, 'title': m['m'], 'start': 0})
+        timestamp = int(m['start'] or 0)
+        if timestamp and (not entry['start'] or timestamp < entry['start']):
+            entry['start'] = timestamp
+    hltv_cache = hltv_cache_path or ROOT / 'hltv_results_cache.json'
+    hltv_results = refresh_hltv(hltv_cache, list(hltv_events.values()))
     return {
+        'hltvResults': hltv_results,
         'generated':datetime.now(timezone.utc).isoformat(timespec='seconds'),
         'lastScan': meta.get('last_successful_poll',''),
         'minimum':100,
@@ -156,7 +169,7 @@ a{color:#90d5ff}button,input,select{font:inherit}button{cursor:pointer}button:fo
 .fixture-day:first-child{border-top:0}.fixture-row{display:grid;grid-template-columns:85px minmax(135px,1.3fr) minmax(130px,1.2fr) minmax(172px,1.1fr) minmax(110px,.72fr) 84px 17px;align-items:center;column-gap:12px;padding:13px 14px;width:100%;text-align:left;background:transparent;border:0;border-top:1px solid #263851;color:var(--fg)}
 .fixture-row:hover{background:#1c324c}.fixture-time{font-size:11px;color:#c4d8ed;text-align:center;padding-right:13px;border-right:1px solid #354862}.fixture-clock{font-size:15px;font-weight:750;font-variant-numeric:tabular-nums}
 .fixture-when{font-size:9px;line-height:1.1;font-weight:800;letter-spacing:.04em;margin-top:4px;color:#97abc5}.fixture-when.started{color:#eac382}.fixture-when.upcoming{color:#78e4bc}
-.fixture-teams{min-width:0}.fixture-team{font-weight:680;line-height:1.45;overflow-wrap:anywhere}.fixture-meta{min-width:0}.fixture-league{color:#b8cae1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.fixture-result{color:#8bd7bb;font-weight:750;font-size:12px;margin-top:5px}.fixture-teams{min-width:0}.fixture-team{font-weight:680;line-height:1.45;overflow-wrap:anywhere}.fixture-meta{min-width:0}.fixture-league{color:#b8cae1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 .fixture-tags{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:5px}.tiny-label{font-size:10px;color:#c4d3e7;border:1px solid #3c506d;padding:2px 6px;border-radius:4px}
 .fixture-sides{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:0}.side-stack{min-width:0}.side-caption{display:block;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.side-value{font-size:12px;font-weight:730;color:#96e8cf;white-space:nowrap}
 .fixture-total{font-size:14px;white-space:nowrap}.fixture-volume .small{font-size:10px}.fixture-odds{font-size:12px;color:#e0c48b;white-space:nowrap;text-align:right}.fixture-arrow{font-size:24px;color:#a3c5db;line-height:1;text-align:right}.show-more{margin:-3px 0 22px 12px}
@@ -213,6 +226,7 @@ function walletUrl(w){return /^0x[a-f0-9]{40}$/.test(w||'')?'https://polymarket.
 function td(tr,item,cls){const e=mk('td',cls||'');e.append(item instanceof Node?item:document.createTextNode(String(item)));tr.append(e);return e}
 function pill(t){return mk('span','pill '+t,tierText(t))}
 function eventKey(m){return (m.s||(m.m&&!m.m.startsWith('Nieznany mecz')?m.m:m.c)).toLowerCase()}
+const hltvResults=D.hltvResults||{};
 const allEvents=new Map();
 for(const m of MS){let key=eventKey(m),event=allEvents.get(key);if(!event){event={key,title:m.m,slug:m.s,tier:m.tier,markets:[],rows:[]};allEvents.set(key,event)}event.markets.push(m)}
 for(const r of TR){const m=marketById.get(r.c);if(!m)continue;let e=allEvents.get(eventKey(m));if(!e){e={key:eventKey(m),title:m.m,slug:m.s,tier:m.tier,markets:[m],rows:[]};allEvents.set(e.key,e)}e.rows.push(r)}
@@ -272,7 +286,7 @@ function eventPressure(e,minutes=pressureMinutes,minOdds=pressureMinOdds){
 }
 function pressureList(){const items=[];
  for(const e of allEvents.values()){
-  if(e.title.startsWith('Nieznany mecz'))continue;
+  if(e.title.startsWith('Nieznany mecz')||eventStatus(e)==='archive')continue;
   if($('#tier').value!=='all'&&e.tier!==$('#tier').value)continue;
   const p=eventPressure(e);if(!p||p.sum<pressureMinUSD)continue;
   if(p.share<.65)continue;
@@ -327,7 +341,7 @@ function leagueName(e){
 }
 function eventStatus(e){
   const now=Date.now()/1000;
-  if(e.closed)return 'archive';
+  if(e.hltv?.status==='finished'||e.closed)return 'archive';
   if(!e.start)return 'undated';
   if(e.start>now)return 'upcoming';
   return now-e.start<=8*3600?'started':'archive';
@@ -348,8 +362,9 @@ for(const e of allEvents.values()){
  e.volume=known.length?Math.max(...known):null;
  e.teams=parsedTeams(e.title);
  e.region=getRegion(e);
+  e.hltv=hltvResults[e.key]||null;
 }
-let stageChoice='all',leagueChoice='all',regionChoice='all',onlyWithTrades=false,minPMVolume=100;
+let stageChoice='active',leagueChoice='all',regionChoice='all',onlyWithTrades=false,minPMVolume=100;
 function fixtureRow(x){
  const {e,rr}=x, m=pickMarket(e,rr),main=rr.filter(r=>r.c===m?.c),side=getSides(m,main);
  const sideA=side.find(s=>s.o.toLowerCase()===e.teams[0].toLowerCase())||side[0];
@@ -360,10 +375,12 @@ function fixtureRow(x){
  const when=e.start?timeFmt.format(e.start*1000):'—:—';
  t.append(mk('div','fixture-clock',when));
  t.title=e.start?'Planowane rozpoczęcie: '+dt(e.start)+' (czas polski)':'Polymarket nie podał godziny rozpoczęcia';
- t.append(mk('div','fixture-when '+stage,stage==='started'?'PO STARCIE':stage==='upcoming'?'PLAN':stage==='archive'?'ARCHIWUM':'BEZ GODZ.'));
+ const statusLabel=stage==='archive'&&e.hltv?.status==='finished'?'KONIEC':stage==='started'?'PO STARCIE':stage==='upcoming'?'PLAN':stage==='archive'?'ARCHIWUM':'BEZ GODZ.';
+  t.append(mk('div','fixture-when '+stage,statusLabel));
  const teams=mk('div','fixture-teams');
  const a=mk('div','fixture-team',e.teams[0]||e.title),b=mk('div','fixture-team',e.teams[1]||'Drugi zespół nieustalony');
  teams.append(a,b);
+  if(e.hltv?.status==='finished'&&Array.isArray(e.hltv.score)&&e.hltv.score.length===2)teams.append(mk('div','fixture-result',`${e.hltv.score[0]} : ${e.hltv.score[1]} · HLTV`));
  const meta=mk('div','fixture-meta');meta.append(mk('div','fixture-league',leagueName(e)));const tags=mk('div','fixture-tags');
  tags.append(pill(e.tier));const bo=(e.title||'').match(/\bBO[135]\b/i);if(bo)tags.append(mk('span','tiny-label',bo[0].toUpperCase()));
  tags.append(mk('span','tiny-label',`${e.markets.length} rynków`));const pres=eventPressure(e);if(pres&&pres.sum>=pressureMinUSD&&pres.share>=.65){tags.append(mk('span','flow-fixture-tag',`↑ ${(pres.share*100).toFixed(0)}% → ${pres.top} (${money(pres.amount)})`))}meta.append(tags);
@@ -389,7 +406,9 @@ function showMatches(rows){
   // Jesli filtrowane jest konkretne obstawienie lub portfel, nie pokazuj pustych meczow.
   const deepSearch=!!$('#outcome').value.trim()||(/0x[a-f0-9]{4,}/i).test($('#search').value)||activeBounds().amountMin>0||!!$('#max').value||!!$('#oddmax').value||($('#oddmin').value.trim()!=='1.20'&&!!$('#oddmin').value.trim());
   if((deepSearch||onlyWithTrades)&&!rr.length)continue;
-  if(stageChoice!=='all'&&eventStatus(e)!==stageChoice)continue;
+  const eventStage=eventStatus(e);
+  if(stageChoice==='active'&&eventStage==='archive')continue;
+  if(stageChoice!=='all'&&stageChoice!=='active'&&eventStage!==stageChoice)continue;
   if(leagueChoice!=='all'&&leagueName(e)!==leagueChoice)continue;
   if(regionChoice!=='all'&&e.region!==regionChoice)continue;
   if($('#tier').value!=='all'&&e.tier!==$('#tier').value)continue;
@@ -401,7 +420,7 @@ function showMatches(rows){
  // Pasek narzedzi: statusy + liga + region; bez wplywu na inne zakladki.
  const panel=mk('div','fixture-layout');const sidebar=mk('aside','fixture-sidebar');
  sidebar.append(mk('div','side-heading','FILTRY MECZÓW'));
- const choices=[['all','Wszystkie'],['started','Po starcie*'],['upcoming','Nadchodzące'],['archive','Archiwum'],['undated','Bez terminu']];
+ const choices=[['active','Aktualne'],['started','Po starcie*'],['upcoming','Nadchodzące'],['archive','Archiwum'],['undated','Bez terminu'],['all','Wszystkie']];
  for(const [key,label] of choices){const btn=mk('button','fixture-stage'+(stageChoice===key?' active':''),label);btn.type='button';
   btn.onclick=()=>{stageChoice=key;displayLimit=160;render()};sidebar.append(btn)}
  const toggle=mk('label','fixture-check');const cb=mk('input');cb.type='checkbox';cb.checked=onlyWithTrades;cb.onchange=()=>{onlyWithTrades=cb.checked;render()};toggle.append(cb,mk('span','','Tylko mecze z zakupami'));sidebar.append(toggle);
@@ -420,7 +439,7 @@ function showMatches(rows){
  const meta=mk('span','fixture-count',`${matches.filter(x=>x.rr.length).length} z zakupami`);top.append(meta);content.append(top);
  const missing=[...allEvents.values()].filter(e=>e.title.startsWith('Nieznany mecz')&&e.rows.length).length;
  if(missing)content.append(mk('p','small muted fixture-legacy',`Starsze wpisy bez nazw spotkań (${missing} rynków) znajdziesz w zakładce Transakcje.`));
- const pressure=pressureList().slice(0,4);if(pressure.length){const box=mk('div','flow-teaser');const h=mk('div','flow-teaser-title');h.append(mk('strong','','↗ Największe przechylenia zakupów ('+pressureMinutes+' min)'));const jump=mk('button','show-all','Pełny ranking →');jump.onclick=()=>{tab='pressure';render()};h.append(jump);box.append(h);const items=mk('div','flow-teaser-grid');for(const x of pressure)items.append(pressureCard(x,true));box.append(items);content.append(box)}
+ const pressure=pressureList().filter(x=>eventStatus(x.e)!=='archive').slice(0,4);if(pressure.length){const box=mk('div','flow-teaser');const h=mk('div','flow-teaser-title');h.append(mk('strong','','↗ Największe przechylenia zakupów ('+pressureMinutes+' min)'));const jump=mk('button','show-all','Pełny ranking →');jump.onclick=()=>{tab='pressure';render()};h.append(jump);box.append(h);const items=mk('div','flow-teaser-grid');for(const x of pressure)items.append(pressureCard(x,true));box.append(items);content.append(box)}
  const order=['started','upcoming','undated','archive'];const title={started:'Po planowanym rozpoczęciu',upcoming:'Nadchodzące mecze',undated:'Mecze bez potwierdzonej godziny',archive:'Archiwum spotkań'};
  const buckets=new Map(order.map(k=>[k,[]]));for(const x of matches)buckets.get(eventStatus(x.e)).push(x);
  for(const [key,group] of buckets){if(!group.length)continue;const mode=$('#sort').value;
@@ -443,7 +462,11 @@ function showMatches(rows){
 function openMatch(key){selected=key;selectedMarket=null;window.location.hash='match='+encodeURIComponent(key);tab='detail';render()}
 function closeDetail(){selected=null;selectedMarket=null;window.location.hash='';tab='matches';render()}
 function showDetail(rows){const event=allEvents.get(selected);if(!event){closeDetail();return}const eRows=rows.filter(r=>eventKey(marketById.get(r.c))===selected);const target=$('#main');target.replaceChildren();const p=mk('div','panel detail');const h=mk('div','detail-head');const left=mk('div');const back=mk('button','back','← Wróć do meczów');back.onclick=closeDetail;left.append(back, mk('h2','',event.title));left.append(mk('div','detail-meta',`${eRows.length} zakupów w filtrze • ${event.markets.length} rynków • niepełna obserwacja ≥ 100 USD`));h.append(left);h.append(aLink('Polymarket ↗',matchUrl(event.slug)));p.append(h);const attention=eventPressure(event);if(attention&&attention.sum>=pressureMinUSD){const note=mk('div','subsection');note.append(mk('h3','','Przechylenie obserwowanych zakupów · '+pressureMinutes+' min'));note.append(pressureCard(attention));p.append(note)}
- const ctrl=mk('div','detail-controls');ctrl.append(mk('strong','','Rynek:'));const sel=mk('select');const best=pickMarket(event,eRows);for(const m of event.markets){const o=mk('option','',m.q||'Rynek bez nazwy');o.value=m.c;sel.append(o)}if(!selectedMarket||!event.markets.some(m=>m.c===selectedMarket))selectedMarket=best?.c||event.markets[0]?.c;sel.value=selectedMarket;sel.onchange=()=>{selectedMarket=sel.value;showDetail(filterRows())};ctrl.append(sel,pill(event.tier));p.append(ctrl);
+ if(event.hltv?.status==='finished'&&Array.isArray(event.hltv.score)){
+   const score=mk('div','subsection small muted',`Wynik HLTV: ${event.hltv.score.join(':')} · mecz zakończony`);
+   if(/^https:\/\/www\.hltv\.org\/matches\//.test(event.hltv.url||''))score.append(document.createTextNode(' · '),aLink('HLTV ↗',event.hltv.url));p.append(score);
+  }
+  const ctrl=mk('div','detail-controls');ctrl.append(mk('strong','','Rynek:'));const sel=mk('select');const best=pickMarket(event,eRows);for(const m of event.markets){const o=mk('option','',m.q||'Rynek bez nazwy');o.value=m.c;sel.append(o)}if(!selectedMarket||!event.markets.some(m=>m.c===selectedMarket))selectedMarket=best?.c||event.markets[0]?.c;sel.value=selectedMarket;sel.onchange=()=>{selectedMarket=sel.value;showDetail(filterRows())};ctrl.append(sel,pill(event.tier));p.append(ctrl);
  const chosen=marketById.get(selectedMarket),rr=eRows.filter(r=>r.c===selectedMarket),sides=getSides(chosen,rr),sum=rr.reduce((a,r)=>a+r.a,0);const s=mk('div','sides');for(let i=0;i<Math.max(2,sides.length);i++){const side=sides[i]||{o:'Druga strona — brak danych',total:0,fills:0,wallets:0};s.append(sideCard(side,sum,i))}p.append(s);
  const desc=mk('div','subsection small muted',`Wartości to suma zaobserwowanych zakupów BUY w wybranym rynku i czasie. Nie uwzględniamy sprzedaży, mniejszych zleceń ani brakujących danych API. Zmieniając rynek, możesz przejrzeć także mapy i inne typy zakładów.`);p.append(desc);
  const two=mk('div','subsection');two.append(mk('h3','','Portfele — obie strony rynku'));const box=mk('div','details-tables');for(let i=0;i<Math.min(sides.length,2);i++){const side=sides[i],wallets=new Map();for(const r of rr.filter(r=>r.o===side.o)){const key=r.w||'Brak portfela';let obj=wallets.get(key);if(!obj){obj={w:key,amount:0,fills:0,last:0,n:r.n};wallets.set(key,obj)}obj.amount+=r.a;obj.fills++;obj.last=Math.max(obj.last,r.t)}const v=[...wallets.values()].sort((a,b)=>b.amount-a.amount);const wrap=mk('div','panel'),title=mk('div','panel-title');child(title,mk('strong','',side.o),mk('span','small muted',`${v.length} portfeli`));wrap.append(title);const sc=mk('div','table-scroll compact'),t=mk('table'),thead=mk('thead'),tr=mk('tr');['Portfel','Zakupy','Liczba'].forEach(h=>child(tr,mk('th','',h)));thead.append(tr);t.append(thead);const tb=mk('tbody');for(const x of v.slice(0,25)){const r=mk('tr');td(r,x.w==='Brak portfela'?x.w:aLink(x.n||short(x.w),walletUrl(x.w)));td(r,money(x.amount),'money');td(r,x.fills);tb.append(r)}t.append(tb);sc.append(t);wrap.append(sc);if(!v.length)wrap.append(mk('div','empty','Brak zakupów tej strony w obserwowanych danych.'));box.append(wrap)}two.append(box);p.append(two);
@@ -537,7 +560,7 @@ def build_page(data: dict) -> str:
 <select id="sort" aria-label="Sortowanie"><option value="newest" selected>Sortuj: najnowsze</option><option value="largest">Sortuj: największe kwoty</option><option value="odds">Sortuj: najwyższe kursy</option><option value="pressure">Sortuj mecze: przechylenie</option></select>
 <button id="export" type="button">↓ Eksport CSV</button></div>
 <main id="main" aria-live="polite"></main>
-<footer><p>Ostatni pełny skan: <b id="scan"></b> · Wygenerowano: <b id="stamp"></b> (czas polski). Odśwież stronę, aby zobaczyć najnowszy opublikowany raport.</p><p>Godziny spotkań są planowanymi terminami z Gamma API (gameStartTime / startTime), wyświetlanymi w strefie Europe/Warsaw, jeśli dostępne. Nigdy nie używamy daty wystawienia rynku jako godziny meczu. „Po starcie” nie potwierdza gry LIVE, a „Archiwum” nie oznacza zweryfikowanego końcowego wyniku. Porównanie stron rynku opiera się wyłącznie na zarejestrowanych BUY: obie strony mogą nie mieć równych danych. Podział na niższe tiery jest heurystyczny. Transakcje bez pełnych metadanych mogą znajdować się w osobnej grupie „Nieznany mecz”.</p><p>Przechylenie opisuje wyłącznie zaobserwowane zakupy, nie łączny obrót, prawdopodobieństwo wyniku ani podejrzenie manipulacji. Panel jest publiczny w GitHub Pages. Nie publikuje tokenu Telegram ani sekretów GitHuba.</p></footer></div>
+<footer><p>Ostatni pełny skan: <b id="scan"></b> · Wygenerowano: <b id="stamp"></b> (czas polski). Odśwież stronę, aby zobaczyć najnowszy opublikowany raport.</p><p>Godziny spotkań są planowanymi terminami z Gamma API (gameStartTime / startTime), wyświetlanymi w strefie Europe/Warsaw, jeśli dostępne. Nigdy nie używamy daty wystawienia rynku jako godziny meczu. „Po starcie” nie potwierdza gry LIVE. „Koniec” oznacza wynik dopasowany z HLTV, zaś „Archiwum” może również wynikać z zamknięcia rynku lub upływu czasu. Porównanie stron rynku opiera się wyłącznie na zarejestrowanych BUY: obie strony mogą nie mieć równych danych. Podział na niższe tiery jest heurystyczny. Transakcje bez pełnych metadanych mogą znajdować się w osobnej grupie „Nieznany mecz”.</p><p>Przechylenie opisuje wyłącznie zaobserwowane zakupy, nie łączny obrót, prawdopodobieństwo wyniku ani podejrzenie manipulacji. Panel jest publiczny w GitHub Pages. Nie publikuje tokenu Telegram ani sekretów GitHuba.</p></footer></div>
 <script>window.__RADAR_DATA__=''' + raw + ''';</script>''' + SCRIPT + '''</body></html>'''
     return html
 
@@ -547,8 +570,9 @@ def main():
     parser.add_argument('--db',type=Path,default=ROOT/'radar.sqlite3')
     parser.add_argument('--cache',type=Path,default=ROOT/'market_cache.json')
     parser.add_argument('--out',type=Path,default=ROOT/'public'/'index.html')
+    parser.add_argument('--hltv-cache',type=Path,default=ROOT/'hltv_results_cache.json')
     args=parser.parse_args()
-    data=fetch_data(args.db,args.cache)
+    data=fetch_data(args.db,args.cache,hltv_cache_path=args.hltv_cache)
     args.out.parent.mkdir(parents=True,exist_ok=True)
     args.out.write_text(build_page(data),encoding='utf-8')
     print(f"Panel wygenerowany: {args.out}, {len(data['trades'])} transakcji, {len(data['markets'])} rynków")
