@@ -1138,7 +1138,7 @@ class Radar:
         # Consecutive digest windows do not overlap. When starting without a
         # prior digest, use at most an hour of recently observed purchases.
         since = max(now - 6 * 3600, last + 1 if last else now - 3600)
-        window_minutes = max(1, (now - since + 60) // 60)
+        window_minutes = max(1, (now - since + 59) // 60)
         grouped: dict[tuple[str, str], dict] = {}
         for condition, outcome, kind, _usd, title, slug, _wallet, _avg_odds, market_title, _created in rows:
             group = grouped.setdefault((condition, outcome), {
