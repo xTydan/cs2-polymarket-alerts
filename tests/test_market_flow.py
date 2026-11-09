@@ -80,6 +80,8 @@ class MarketFlowStorageTests(unittest.TestCase):
             COND2: EventMarket(COND2, "99", "Team A vs Team B", "Match Winner",
                                "match-test", 10000, None, "lower", ["Team A", "Team B"]),
         }
+        for market in self.radar.markets.values():
+            self.db.remember_market(market)
 
     def test_digest_uses_unique_fills_not_cumulative_position(self):
         now = int(time.time())
