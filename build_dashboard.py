@@ -36,8 +36,13 @@ def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000) -> dict:
             market_cols = {r[1] for r in con.execute("PRAGMA table_info(trade_market_info)")}
             outcomes_col = 'outcomes_json' if 'outcomes_json' in market_cols else "'[]'"
             eid_col = 'event_id' if 'event_id' in market_cols else "''"
+            start_col = 'match_start' if 'match_start' in market_cols else '0'
+            league_col = 'league' if 'league' in market_cols else "''"
+            closed_col = 'event_closed' if 'event_closed' in market_cols else '0'
             for r in con.execute(f'''SELECT condition_id,title,market_title,slug,tier,
-                                     {outcomes_col} AS outcomes_json, {eid_col} AS event_id
+                                     {outcomes_col} AS outcomes_json, {eid_col} AS event_id,
+                                     {start_col} AS match_start, {league_col} AS league,
+                                     {closed_col} AS event_closed
                                      FROM trade_market_info'''):
                 market_db[str(r['condition_id']).lower()] = dict(r)
     finally:
@@ -80,7 +85,10 @@ def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000) -> dict:
         outcomes = list(dict.fromkeys(str(x)[:100] for x in outcomes if str(x).strip()))[:12]
         markets[cid] = {'c':cid,'m':title or 'Nieznany mecz (brak metadanych)',
                         'q':question,'s':slug,'tier':tier,'o':outcomes,
-                        'e':str(a.get('event_id') or b.get('event_id') or '')[:50]}
+                        'e':str(a.get('event_id') or b.get('event_id') or '')[:50],
+                        'start':int(b.get('match_start') or a.get('match_start') or 0),
+                        'league':str(b.get('league') or a.get('league') or '')[:140],
+                        'closed':bool(b['event_closed'] if 'event_closed' in b else a.get('event_closed') or False)}
     trades = []
     for r in raw:
         try:
@@ -97,10 +105,10 @@ def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000) -> dict:
                        'o':str(r['outcome'] or '?')[:100], 'a':round(usd,2),
                        'p':round(price,6), 'n':str(r.get('trader_name') or '')[:70]})
     used = {x['c'] for x in trades}
-    event_keys = {(markets[c]['s'] or markets[c]['m']).casefold() for c in used}
-    # Dostepne pozostale rynki do wyboru w szczegolach meczu.
+    # W kalendarzu widoczne sa rowniez przyszle mecze bez zarejestrowanych zakupow.
+    # Historię zamknietych rynkow bierzemy z SQLite tylko jeśli mają transakcje.
     view_markets = [m for m in markets.values()
-                    if m['c'] in used or (m['s'] and m['s'].casefold() in event_keys)]
+                    if m['c'] in used or m['c'] in cached]
     view_markets.sort(key=lambda m:(m['m'],m['q']))
     return {
         'generated':datetime.now(timezone.utc).isoformat(timespec='seconds'),
@@ -108,7 +116,7 @@ def fetch_data(db_path: Path, cache_path: Path, maximum: int = 50000) -> dict:
         'minimum':100,
         'trades':trades,
         'markets':view_markets,
-        'notice': 'Wylacznie zaobserwowane BUY od progu pobierania API; nie wszystkie zaklady, nie saldo otwartych pozycji. Poziom turnieju rozpoznawany heurystycznie.'
+        'notice': 'Zaobserwowane BUY od progu pobierania API. Planowana godzina meczu pochodzi z gameStartTime/startTime Polymarket, status LIVE nie jest potwierdzany. Nie wszystkie zaklady, nie saldo otwartych pozycji.'
     }
 
 
@@ -122,6 +130,32 @@ a{color:#90d5ff}button,input,select{font:inherit}button{cursor:pointer}button:fo
 .panel{background:rgba(18,29,47,.94);border:1px solid var(--edge);border-radius:16px;overflow:hidden}.panel-title{padding:16px 18px;border-bottom:1px solid var(--edge);display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}.panel-title h2{font-size:17px;margin:0}.count{font-size:12px;color:var(--dim)}.matches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.match-card{padding:17px;background:rgba(19,32,52,.96);border:1px solid var(--edge);border-radius:15px;text-align:left;color:var(--fg);transition:background .12s,border-color .12s}.match-card:hover{background:#192e46;border-color:#487ba0}.card-head{display:flex;gap:14px;justify-content:space-between;align-items:flex-start}.match-title{font-size:15px;font-weight:700;line-height:1.4}.kicker{color:var(--dim);font-size:11px;margin-top:5px}.pill{display:inline-block;font-size:11px;border-radius:99px;border:1px solid #5e6d7e;padding:3px 8px;white-space:nowrap}.pill.lower{border-color:#80633e;color:#f5d09c;background:#34271a}.pill.unknown{color:#c5d4e6}.pill.major{color:#bddbff;border-color:#476b9d}.card-total{font-size:19px;font-weight:730;white-space:nowrap}.side-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;margin-top:11px}.teamname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.money{font-variant-numeric:tabular-nums;font-weight:700;color:#94ebca}.bar{background:#2b3d51;border-radius:99px;height:7px;overflow:hidden;margin-top:6px}.bar>span{display:block;background:linear-gradient(90deg,#4d8ad1,#70cadd);height:100%}.bar.alt>span{background:linear-gradient(90deg,#bb8ac9,#e1b9d4)}.card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:14px;color:var(--dim);font-size:12px}
 .detail{margin-bottom:17px}.detail-head{padding:18px 20px;border-bottom:1px solid var(--edge);display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}.detail-head h2{margin:6px 0 2px;font-size:21px}.detail-meta{font-size:12px;color:var(--dim)}.detail-controls{padding:13px 18px;border-bottom:1px solid var(--edge);display:flex;gap:12px;align-items:center;flex-wrap:wrap}.detail-controls select{max-width:100%;flex:1;background:#0e192a;color:var(--fg);border:1px solid #3b516e;border-radius:9px;padding:9px;min-width:160px}.sides{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px}.sidebox{background:#102338;border:1px solid #35506d;border-radius:12px;padding:16px;min-width:0}.sidebox.alt{background:#261c32;border-color:#655077}.sidebox h3{font-size:17px;margin:0 0 10px;overflow-wrap:anywhere}.sidebox .large{font-size:30px;font-weight:750;letter-spacing:-.6px}.sidebox .foot{font-size:12px;color:var(--dim);margin-top:6px}.subsection{padding:0 16px 16px}.subsection h3{margin:14px 0 9px;font-size:15px}.details-tables{display:grid;grid-template-columns:1fr 1fr;gap:12px}.table-scroll{overflow:auto;max-width:100%}table{width:100%;border-collapse:collapse;min-width:690px}th,td{padding:11px 13px;border-top:1px solid #26364d;text-align:left}th{font-size:11px;letter-spacing:.035em;text-transform:uppercase;color:#b4c6de;background:#142338;white-space:nowrap}td{max-width:360px;overflow-wrap:anywhere}.table-scroll.compact table{min-width:360px}td .secondary{font-size:11px;color:var(--dim)}.right{text-align:right}.center{text-align:center}tbody tr:hover{background:#1a2d43}.link{color:#8ed4ff;text-decoration:none}.link:hover{text-decoration:underline}.empty{padding:35px 16px;color:var(--dim);text-align:center}.morebox{padding:15px;text-align:center;border-top:1px solid var(--edge)}.back{border:none;background:transparent;color:#8ed4ff;font-size:13px;padding:0;margin-bottom:8px}.sectiongap{margin:14px 0}.tagtext{font-size:11px;color:var(--dim)}footer{color:var(--dim);font-size:12px;margin-top:24px;max-width:1120px}footer p{margin:7px 0}
 @media(max-width:780px){.shell{padding:17px 11px 40px}.brand h1{font-size:20px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi .big{font-size:22px}.matches,.sides,.details-tables{grid-template-columns:1fr}.toolbar select{flex:1 1 120px}.toolbar input[type=search]{flex-basis:100%}.detail-head h2{font-size:18px}.card-head .card-total{font-size:17px}}
+
+
+/* v1.9: compact match schedule */
+.fixture-layout{display:grid;grid-template-columns:226px minmax(0,1fr);gap:16px;align-items:start}
+.fixture-sidebar{border:1px solid var(--edge);border-radius:13px;background:#101b2d;padding:16px;position:sticky;top:10px;min-width:0}
+.side-heading{font-size:11px;letter-spacing:.095em;color:#9fb8d3;font-weight:800;margin-bottom:12px}.gap-above{margin-top:22px}
+.fixture-stage{width:100%;text-align:left;display:block;background:none;color:#bfd0e7;border:1px solid transparent;padding:10px 12px;border-radius:9px;margin-bottom:3px}
+.fixture-stage:hover,.fixture-stage.active{background:#1c3e5b;color:#fff;border-color:#3e7094}.fixture-check{display:flex;gap:8px;align-items:center;margin-top:14px;color:#c1d3e6;font-size:12px}
+.fixture-select{max-width:100%;width:100%;background:#112438;color:#eef5ff;border:1px solid #35516d;border-radius:9px;padding:10px 8px}
+.fixture-aside-note{color:var(--dim);font-size:11px;line-height:1.55;margin:20px 2px 0}
+.fixture-content{min-width:0}.fixture-main-head{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 6px 17px}
+.fixture-main-head h2{font-size:19px;margin:0 0 4px}.fixture-legacy{padding:0 6px 8px;margin:0}.fixture-count{background:#1a3b53;border:1px solid #355573;border-radius:40px;padding:7px 10px;white-space:nowrap;font-size:12px}
+.fixtures-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0 8px;padding:6px 7px}.fixtures-section-head h3{font-size:15px;margin:0}
+.fixture-list{border-radius:12px;border:1px solid var(--edge);background:#121e30;overflow:hidden;margin-bottom:22px}
+.fixture-day{padding:8px 14px;background:#192941;border-top:1px solid #2d4057;color:#bed0e8;font-size:11px;font-weight:750;text-transform:capitalize;letter-spacing:.025em}
+.fixture-day:first-child{border-top:0}.fixture-row{display:grid;grid-template-columns:85px minmax(135px,1.3fr) minmax(130px,1.2fr) minmax(172px,1.1fr) minmax(110px,.72fr) 84px 17px;align-items:center;column-gap:12px;padding:13px 14px;width:100%;text-align:left;background:transparent;border:0;border-top:1px solid #263851;color:var(--fg)}
+.fixture-row:hover{background:#1c324c}.fixture-time{font-size:11px;color:#c4d8ed;text-align:center;padding-right:13px;border-right:1px solid #354862}.fixture-clock{font-size:15px;font-weight:750;font-variant-numeric:tabular-nums}
+.fixture-when{font-size:9px;line-height:1.1;font-weight:800;letter-spacing:.04em;margin-top:4px;color:#97abc5}.fixture-when.started{color:#eac382}.fixture-when.upcoming{color:#78e4bc}
+.fixture-teams{min-width:0}.fixture-team{font-weight:680;line-height:1.45;overflow-wrap:anywhere}.fixture-meta{min-width:0}.fixture-league{color:#b8cae1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.fixture-tags{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:5px}.tiny-label{font-size:10px;color:#c4d3e7;border:1px solid #3c506d;padding:2px 6px;border-radius:4px}
+.fixture-sides{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:0}.side-stack{min-width:0}.side-caption{display:block;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.side-value{font-size:12px;font-weight:730;color:#96e8cf;white-space:nowrap}
+.fixture-total{font-size:14px;white-space:nowrap}.fixture-volume .small{font-size:10px}.fixture-odds{font-size:12px;color:#e0c48b;white-space:nowrap;text-align:right}.fixture-arrow{font-size:24px;color:#a3c5db;line-height:1;text-align:right}.show-more{margin:-3px 0 22px 12px}
+@media(max-width:1260px){.fixture-row{grid-template-columns:72px minmax(112px,1.4fr) minmax(110px,1fr) minmax(138px,1.05fr) minmax(95px,.85fr) 16px;gap:8px}.fixture-odds{display:none}.fixture-layout{grid-template-columns:195px minmax(0,1fr)} }
+@media(max-width:880px){.fixture-layout{display:block}.fixture-sidebar{position:static;display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding:10px;margin-bottom:14px}.fixture-sidebar .side-heading,.fixture-sidebar .fixture-aside-note{display:none}.fixture-stage{width:auto;padding:8px 10px;margin:0;font-size:12px}.fixture-check{margin:0 8px}.fixture-select{width:auto;flex:1 1 150px;max-width:300px;font-size:12px}}
+@media(max-width:670px){.fixture-row{grid-template-columns:59px minmax(0,1.25fr) minmax(100px,1fr) 12px;gap:8px;padding:12px 8px}.fixture-time{padding-right:7px}.fixture-clock{font-size:13px}.fixture-teams{font-size:12px}.fixture-meta{grid-column:2 / 4;grid-row:2;padding-top:3px}.fixture-sides{display:none}.fixture-volume{text-align:right}.fixture-total{font-size:12px}.fixture-row .fixture-arrow{grid-column:4;grid-row:1}.fixture-league{font-size:11px}.fixture-main-head h2{font-size:16px}.fixture-count{font-size:10px}.fixture-day{font-size:10px}}
+
 </style>'''
 
 SCRIPT = r'''<script>
@@ -166,14 +200,124 @@ function statCalc(rows){const wallets=new Set(rows.filter(r=>r.w).map(r=>r.w));c
 function sideStat(rows,o){const rr=rows.filter(r=>r.o===o);return {o,total:rr.reduce((a,r)=>a+r.a,0),fills:rr.length, wallets:new Set(rr.filter(r=>r.w).map(r=>r.w)).size,latest:Math.max(0,...rr.map(r=>r.t))}}
 function getSides(m,rows){let opts=outcomes(m,rows);if(!opts.length)opts=['Brak danych'];return opts.map(o=>sideStat(rows,o))}
 function sideCard(side,total,i){const c=mk('div','sidebox'+(i?' alt':''));child(c,mk('h3','',side.o),mk('div','large money',money(side.total)));const b=mk('div','bar'+(i?' alt':''));const fill=mk('span');fill.style.width=(total>0?(side.total/total*100):0).toFixed(1)+'%';b.append(fill);child(c,b,mk('div','foot',`${side.fills} transakcji • ${side.wallets} portfeli • ${total?Math.round(side.total/total*100):0}% zaobserwowanych zakupów`));return c}
-function card(event,rows){const m=pickMarket(event,rows);if(!m)return null;const main=rows.filter(r=>r.c===m.c);const sides=getSides(m,main);const total=main.reduce((a,r)=>a+r.a,0);const last=Math.max(0,...rows.map(r=>r.t));let b=mk('button','match-card');b.type='button';const h=mk('div','card-head'),left=mk('div');child(left,mk('div','match-title',event.title),mk('div','kicker',`${event.markets.length} rynków • ${rows.length} zaobserwowanych zakupów`));const totalBox=mk('div','');child(totalBox,mk('div','card-total money',money(rows.reduce((a,r)=>a+r.a,0))),mk('div','small muted','Wszystkie rynki'));child(h,left,totalBox);b.append(h);const p=mk('div');p.style.marginTop='9px';p.append(pill(event.tier));b.append(p);
- for(const [i,s] of sides.slice(0,2).entries()){const line=mk('div','side-row'),name=mk('span','teamname',s.o),val=mk('span','money',money(s.total));child(line,name,val);b.append(line);const bar=mk('div','bar'+(i?' alt':'')),fill=mk('span');fill.style.width=(total>0?s.total/total*100:0)+'%';bar.append(fill);b.append(bar)}
- const f=mk('div','card-foot');child(f,mk('span','',`Ostatni zakup: ${niceTime(last)}`),mk('span','',`Szczegóły →`));b.append(f);b.onclick=()=>openMatch(event.key);return b}
-function showMatches(rows){const target=$('#main');target.replaceChildren();const evs=[];for(const e of allEvents.values()){const rr=rows.filter(r=>eventKey(marketById.get(r.c))===e.key);if(rr.length)evs.push({e,rr,volume:rr.reduce((a,r)=>a+r.a,0),last:Math.max(...rr.map(r=>r.t))})}
- const sort=$('#sort').value;evs.sort((a,b)=>sort==='newest'?b.last-a.last:
- sort==='odds'?Math.max(...b.rr.map(r=>1/r.p))-Math.max(...a.rr.map(r=>1/r.p)):
- b.volume-a.volume);const p=mk('section');const head=mk('div','panel-title');child(head,mk('h2','','Mecze CS2'),mk('span','count',`${evs.length} meczów z zakupami w wybranym zakresie`));p.append(head);target.append(p);const grid=mk('div','matches');target.append(grid);for(const x of evs.slice(0,displayLimit))grid.append(card(x.e,x.rr));if(!evs.length)target.append(mk('div','empty','Brak meczów dla wybranych filtrów.'));
- if(evs.length>displayLimit){const more=mk('div','morebox'),button=mk('button','btn','Pokaż kolejne 100');button.onclick=()=>{displayLimit+=100;showMatches(rows)};more.append(button);target.append(more)}
+// HLTV-style match schedule, powered only by available Gamma timestamps and recorded buys.
+const timeFmt=new Intl.DateTimeFormat('pl-PL',{timeZone:'Europe/Warsaw',hour:'2-digit',minute:'2-digit'});
+const dayFmt=new Intl.DateTimeFormat('pl-PL',{timeZone:'Europe/Warsaw',weekday:'long',day:'numeric',month:'long'});
+const dateFmt=new Intl.DateTimeFormat('pl-PL',{timeZone:'Europe/Warsaw',year:'numeric',month:'2-digit',day:'2-digit'});
+function parsedTeams(title){
+  const core=String(title||'').replace(/^(?:Counter-Strike(?:\s*2)?|CS2):\s*/i,'');
+  const hit=core.match(/^(.+?)\s+(?:vs\.?|versus)\s+(.+?)(?=\s*\(BO[135]\)|\s+-\s+|$)/i);
+  if(!hit)return [core.slice(0,100),''];
+  return [hit[1].trim().slice(0,80),hit[2].trim().slice(0,80)];
+}
+function leagueName(e){
+  const direct=String(e.league||'').trim();if(direct)return direct;
+  const t=e.title||'';const parts=t.split(/\s+-\s+/);return parts.length>1?parts.slice(1).join(' - ').slice(0,95):'Turniej nieustalony';
+}
+function eventStatus(e){
+  const now=Date.now()/1000;
+  if(e.closed)return 'archive';
+  if(!e.start)return 'undated';
+  if(e.start>now)return 'upcoming';
+  return now-e.start<=8*3600?'started':'archive';
+}
+function getRegion(e){const text=(leagueName(e)+' '+e.title).toLowerCase();
+ if(/south america|latam|brazil|brazyl|argentin/.test(text))return 'Ameryka Płd.';
+ if(/north america|\busa\b|united states|canada/.test(text))return 'Ameryka Płn.';
+ if(/asia|china|korea|oceania|australia|pacific/.test(text))return 'Azja / Oceania';
+ if(/europe|europa|european|poland|polska|nordic|sweden|france|germany/.test(text))return 'Europa';
+ return 'Nieustalony';
+}
+for(const e of allEvents.values()){
+ const starts=e.markets.map(m=>Number(m.start)||0).filter(t=>t>0);
+ e.start=starts.length?Math.min(...starts):0;
+ e.closed=e.markets.every(m=>!!m.closed);
+ e.league=e.markets.map(m=>m.league||'').find(Boolean)||'';
+ e.teams=parsedTeams(e.title);
+ e.region=getRegion(e);
+}
+let stageChoice='all',leagueChoice='all',regionChoice='all',onlyWithTrades=false;
+function fixtureRow(x){
+ const {e,rr}=x, m=pickMarket(e,rr),main=rr.filter(r=>r.c===m?.c),side=getSides(m,main);
+ const sideA=side.find(s=>s.o.toLowerCase()===e.teams[0].toLowerCase())||side[0];
+ const sideB=side.find(s=>s.o.toLowerCase()===e.teams[1].toLowerCase())||side.find(s=>s.o!==sideA?.o);
+ const row=mk('button','fixture-row');row.type='button';row.setAttribute('aria-label',`Otwórz szczegóły meczu ${e.title}`);
+ const t=mk('div','fixture-time');
+ const stage=eventStatus(e);
+ const when=e.start?timeFmt.format(e.start*1000):'—:—';
+ t.append(mk('div','fixture-clock',when));
+ t.append(mk('div','fixture-when '+stage,stage==='started'?'PO STARCIE':stage==='upcoming'?'PLAN':stage==='archive'?'ARCHIWUM':'BEZ GODZ.'));
+ const teams=mk('div','fixture-teams');
+ const a=mk('div','fixture-team',e.teams[0]||e.title),b=mk('div','fixture-team',e.teams[1]||'Drugi zespół nieustalony');
+ teams.append(a,b);
+ const meta=mk('div','fixture-meta');meta.append(mk('div','fixture-league',leagueName(e)));const tags=mk('div','fixture-tags');
+ tags.append(pill(e.tier));const bo=(e.title||'').match(/\bBO[135]\b/i);if(bo)tags.append(mk('span','tiny-label',bo[0].toUpperCase()));
+ tags.append(mk('span','tiny-label',`${e.markets.length} rynków`));meta.append(tags);
+ const rvalue=mk('div','fixture-sides');
+ const v1=mk('div','side-value',sideA?.fills?money(sideA.total):'—');
+ const v2=mk('div','side-value',sideB?.fills?money(sideB.total):'—');
+ rvalue.append(child(mk('div','side-stack'),mk('span','side-caption','Zakupy · '+(e.teams[0]||sideA?.o||'strona A')),v1),child(mk('div','side-stack'),mk('span','side-caption','Zakupy · '+(e.teams[1]||sideB?.o||'strona B')),v2));
+ const sum=mk('div','fixture-volume');sum.append(mk('div','fixture-total money',x.volume>0?money(x.volume):'—'),mk('div','small muted',`${rr.length} zakupów · wszystkie rynki`));
+ const best=rr.length?Math.max(...rr.map(r=>1/r.p)):0;
+ const odds=mk('div','fixture-odds',best?`max ${best.toFixed(2)}`:'—');odds.title='Najwyższy kurs zaobserwowanego zakupu w zastosowanych filtrach; nie jest to obecny kurs';
+ row.append(t,teams,meta,rvalue,sum,odds,mk('span','fixture-arrow','›'));
+ row.onclick=()=>openMatch(e.key);
+ return row;
+}
+function showMatches(rows){
+ const target=$('#main');target.replaceChildren();
+ const byEvent=new Map();for(const r of rows){const m=marketById.get(r.c);if(!m)continue;const key=eventKey(m);if(!byEvent.has(key))byEvent.set(key,[]);byEvent.get(key).push(r)}
+ const matches=[];
+ for(const e of allEvents.values()){
+  if(!e.markets.length||e.title.startsWith('Nieznany mecz'))continue;
+  const rr=byEvent.get(e.key)||[];
+  // Jesli filtrowane jest konkretne obstawienie lub portfel, nie pokazuj pustych meczow.
+  const deepSearch=!!$('#outcome').value.trim()||(/0x[a-f0-9]{4,}/i).test($('#search').value)||Number($('#min').value)>0||!!$('#max').value;
+  if((deepSearch||onlyWithTrades)&&!rr.length)continue;
+  if(stageChoice!=='all'&&eventStatus(e)!==stageChoice)continue;
+  if(leagueChoice!=='all'&&leagueName(e)!==leagueChoice)continue;
+  if(regionChoice!=='all'&&e.region!==regionChoice)continue;
+  if($('#tier').value!=='all'&&e.tier!==$('#tier').value)continue;
+  const query=$('#search').value.toLowerCase().trim();if(query && ![e.title,leagueName(e),e.teams.join(' ')].some(v=>v.toLowerCase().includes(query)) && !rr.length)continue;
+  if($('#marketKind').value!=='all'&&!e.markets.some(m=>marketKind(m)===$('#marketKind').value))continue;
+  if(eventStatus(e)==='archive' && !e.closed && !rr.length)continue; // brak danych historycznych
+  matches.push({e,rr,volume:rr.reduce((a,r)=>a+r.a,0),last:rr.length?Math.max(...rr.map(r=>r.t)):0});
+ }
+ // Pasek narzedzi: statusy + liga + region; bez wplywu na inne zakladki.
+ const panel=mk('div','fixture-layout');const sidebar=mk('aside','fixture-sidebar');
+ sidebar.append(mk('div','side-heading','FILTRY MECZÓW'));
+ const choices=[['all','Wszystkie'],['started','Po starcie*'],['upcoming','Nadchodzące'],['archive','Archiwum'],['undated','Bez terminu']];
+ for(const [key,label] of choices){const btn=mk('button','fixture-stage'+(stageChoice===key?' active':''),label);btn.type='button';
+  btn.onclick=()=>{stageChoice=key;displayLimit=160;render()};sidebar.append(btn)}
+ const toggle=mk('label','fixture-check');const cb=mk('input');cb.type='checkbox';cb.checked=onlyWithTrades;cb.onchange=()=>{onlyWithTrades=cb.checked;render()};toggle.append(cb,mk('span','','Tylko mecze z zakupami'));sidebar.append(toggle);
+ sidebar.append(mk('div','side-heading gap-above','TURNIEJ'));
+ const ligues=[...new Set([...allEvents.values()].map(leagueName))].sort((a,b)=>a.localeCompare(b,'pl'));
+ const select=mk('select','fixture-select');const optAll=mk('option','', 'Wszystkie turnieje');optAll.value='all';select.append(optAll);
+ for(const lg of ligues){const op=mk('option','',lg);op.value=lg;select.append(op)}select.value=leagueChoice;select.onchange=()=>{leagueChoice=select.value;render()};sidebar.append(select);
+ sidebar.append(mk('div','side-heading gap-above','REGION (Z NAZWY)'));
+ const reg=mk('select','fixture-select');for(const lg of ['all','Europa','Ameryka Płd.','Ameryka Płn.','Azja / Oceania','Nieustalony']){const op=mk('option','',lg==='all'?'Wszystkie regiony':lg);op.value=lg;reg.append(op)}reg.value=regionChoice;reg.onchange=()=>{regionChoice=reg.value;render()};sidebar.append(reg);
+ sidebar.append(mk('p','fixture-aside-note','* „Po starcie” oznacza upływ planowanej godziny, a nie potwierdzone LIVE. Terminy z Polymarket, gdy dostępne.'));
+ const content=mk('section','fixture-content');const top=mk('div','fixture-main-head');top.append(child(mk('div'),mk('h2','','Mecze Counter-Strike 2'),mk('div','small muted',`${matches.length} spotkań • zakupy od progu API • czasy PL`)));
+ const meta=mk('span','fixture-count',`${matches.filter(x=>x.rr.length).length} z zakupami`);top.append(meta);content.append(top);
+ const missing=[...allEvents.values()].filter(e=>e.title.startsWith('Nieznany mecz')&&e.rows.length).length;
+ if(missing)content.append(mk('p','small muted fixture-legacy',`Starsze wpisy bez nazw spotkań (${missing} rynków) znajdziesz w zakładce Transakcje.`));
+ const order=['started','upcoming','undated','archive'];const title={started:'Po planowanym rozpoczęciu',upcoming:'Nadchodzące mecze',undated:'Mecze bez potwierdzonej godziny',archive:'Archiwum spotkań'};
+ const buckets=new Map(order.map(k=>[k,[]]));for(const x of matches)buckets.get(eventStatus(x.e)).push(x);
+ for(const [key,group] of buckets){if(!group.length)continue;const mode=$('#sort').value;
+ group.sort((a,b)=>{if(key==='upcoming')return (a.e.start||0)-(b.e.start||0);
+ if(key==='started')return (b.e.start||0)-(a.e.start||0);
+ if(key==='archive')return (b.e.start||b.last)-(a.e.start||a.last);
+ return mode==='newest'?b.last-a.last:mode==='odds'?Math.max(0,...b.rr.map(r=>1/r.p))-Math.max(0,...a.rr.map(r=>1/r.p)):b.volume-a.volume});
+ const heading=mk('div','fixtures-section-head');heading.append(mk('h3','',title[key]),mk('span','count',group.length+' spotkań'));content.append(heading);
+ let shown=0,lastDay='';const list=mk('div','fixture-list');
+ for(const x of group){if(shown>=displayLimit)break;shown++;
+ const day=x.e.start?dateFmt.format(x.e.start*1000):'';if(day&&day!==lastDay){lastDay=day;const h=mk('div','fixture-day',dayFmt.format(x.e.start*1000));list.append(h)}
+ list.append(fixtureRow(x))}
+ content.append(list);
+ if(group.length>displayLimit){const more=mk('button','btn show-more',`Pokaż pozostałe (${group.length-shown})`);more.onclick=()=>{displayLimit+=150;render()};content.append(more)}
+ }
+ if(!matches.length)content.append(mk('div','empty','Brak meczów spełniających wybrane filtry. Zmień zakres lub włącz wszystkie kursy.'));
+ panel.append(sidebar,content);target.append(panel);exportRows=rows;
 }
 function openMatch(key){selected=key;selectedMarket=null;window.location.hash='match='+encodeURIComponent(key);tab='detail';render()}
 function closeDetail(){selected=null;selectedMarket=null;window.location.hash='';tab='matches';render()}
@@ -216,10 +360,10 @@ if(location.hash.startsWith('#match=')){const key=decodeURIComponent(location.ha
 
 def build_page(data: dict) -> str:
     raw = json.dumps(data, ensure_ascii=False, separators=(',',':')).replace('<','\\u003c').replace('>','\\u003e').replace('&','\\u0026')
-    html = '''<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080d16"><title>CS2 Polymarket Radar v1.8 — filtry kursów</title>'''
+    html = '''<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080d16"><title>CS2 Polymarket Radar v1.9 — terminarz CS2</title>'''
     html += STYLE + '''</head><body><div class="shell">
-<header class="brandbar"><div class="brand"><div class="logo" aria-hidden="true">◎</div><div><h1>CS2 Radar <span class="muted">/ Analiza rynków v1.8</span></h1><div class="small muted">Obserwowane zakupy Polymarket · Tier 2/3</div></div></div><div class="status"><span class="bullet"></span>Eksport po skanie GitHub Actions</div></header>
-<div class="note"><b>Uwaga:</b> pokazujemy tylko zaobserwowane BUY od progu API (zwykle 100 USD). Domyślny filtr strony to kurs ≥ 1.20; wybierz „Kurs: wszystkie”, aby zobaczyć także zakupy po 1.01. Suma zakupów nie oznacza aktualnej pozycji portfela ani pełnego wolumenu Polymarket.</div>
+<header class="brandbar"><div class="brand"><div class="logo" aria-hidden="true">◎</div><div><h1>CS2 Radar <span class="muted">/ Terminarz v1.9</span></h1><div class="small muted">Obserwowane zakupy Polymarket · Tier 2/3</div></div></div><div class="status"><span class="bullet"></span>Eksport po skanie GitHub Actions</div></header>
+<div class="note"><b>Uwaga:</b> pokazujemy tylko zaobserwowane BUY od progu API (zwykle 100 USD). Kurs na stronie to kurs zaobserwowanego zakupu, nie aktualna oferta. Domyślny filtr zakupów to ≥ 1.20. Suma zakupów nie oznacza aktualnej pozycji portfela ani pełnego wolumenu Polymarket.</div>
 <section class="kpis"><div class="kpi"><div class="hint">Zakupy w filtrze</div><div id="nTrades" class="big">—</div></div><div class="kpi"><div class="hint">Łączna wartość brutto</div><div id="nUSD" class="big">—</div></div><div class="kpi"><div class="hint">Mecze z aktywnością</div><div id="nGames" class="big">—</div></div><div class="kpi"><div class="hint">Portfele</div><div id="nWallets" class="big">—</div></div></section>
 <nav class="tabs" aria-label="Widoki panelu"><button type="button" class="tab active" data-tab="matches">⚔ Mecze</button><button type="button" class="tab" data-tab="trades">▤ Transakcje</button><button type="button" class="tab" data-tab="positions">▥ Pozycje portfeli</button><button type="button" class="tab" data-tab="wallets">♙ Portfele</button></nav>
 <div class="toolbar"><input id="search" type="search" placeholder="Mecz, drużyna, turniej, portfel…" aria-label="Szukaj">
@@ -234,7 +378,7 @@ def build_page(data: dict) -> str:
 <select id="sort" aria-label="Sortowanie"><option value="largest" selected>Sortuj: największe kwoty</option><option value="newest">Sortuj: najnowsze</option><option value="odds">Sortuj: najwyższe kursy</option></select>
 <button id="export" type="button">↓ Eksport CSV</button></div>
 <main id="main" aria-live="polite"></main>
-<footer><p>Ostatni pełny skan: <b id="scan"></b> · Wygenerowano: <b id="stamp"></b> (czas polski). Odśwież stronę, aby zobaczyć najnowszy opublikowany raport.</p><p>Porównanie stron rynku opiera się wyłącznie na zarejestrowanych BUY: obie strony mogą nie mieć równych danych. Podział na niższe tiery jest heurystyczny. Transakcje bez pełnych metadanych mogą znajdować się w osobnej grupie „Nieznany mecz”.</p><p>Panel jest publiczny w GitHub Pages. Nie publikuje tokenu Telegram ani sekretów GitHuba.</p></footer></div>
+<footer><p>Ostatni pełny skan: <b id="scan"></b> · Wygenerowano: <b id="stamp"></b> (czas polski). Odśwież stronę, aby zobaczyć najnowszy opublikowany raport.</p><p>Godziny spotkań są planowanymi terminami z Gamma API (jeśli dostępne). „Po starcie” nie potwierdza gry LIVE, a „Archiwum” nie oznacza zweryfikowanego końcowego wyniku. Porównanie stron rynku opiera się wyłącznie na zarejestrowanych BUY: obie strony mogą nie mieć równych danych. Podział na niższe tiery jest heurystyczny. Transakcje bez pełnych metadanych mogą znajdować się w osobnej grupie „Nieznany mecz”.</p><p>Panel jest publiczny w GitHub Pages. Nie publikuje tokenu Telegram ani sekretów GitHuba.</p></footer></div>
 <script>window.__RADAR_DATA__=''' + raw + ''';</script>''' + SCRIPT + '''</body></html>'''
     return html
 

@@ -260,6 +260,40 @@ class ApiClient:
             raise RuntimeError(f"Błąd połączenia z Telegramem: {type(error).__name__}") from None
 
 
+def sports_start_timestamp(value: Any) -> int:
+    """Czas rozpoczecia spotkania, NIE data wystawienia rynku.
+
+    Gamma gameStartTime bywa w formacie `2026-11-09 18:00:00+00`.
+    Brak godzin i brak strefy czasowej traktujemy jako brak pewnego terminu.
+    """
+    if not value or not isinstance(value, str):
+        return 0
+    clean = value.strip().replace(" ", "T", 1)
+    if not re.search(r"T\d{2}:\d{2}", clean):
+        return 0
+    clean = clean.replace("Z", "+00:00")
+    clean = re.sub(r"([+-]\d{2})$", r"\1:00", clean)
+    try:
+        start = datetime.fromisoformat(clean)
+        if start.tzinfo is None:
+            return 0
+        return int(start.timestamp())
+    except (ValueError, OverflowError):
+        return 0
+
+
+def series_name(value: Any) -> str:
+    """Opcjonalna nazwa serii dostarczona przez Gamma, bez domyslania ligi."""
+    if isinstance(value, dict):
+        return str(value.get('title') or value.get('name') or '')[:140]
+    if isinstance(value, list):
+        for item in value:
+            name = series_name(item)
+            if name:
+                return name
+    return ''
+
+
 @dataclass
 class EventMarket:
     condition_id: str
@@ -271,6 +305,9 @@ class EventMarket:
     liquidity: float | None
     tier: str
     outcomes: list[str]
+    match_start: int = 0
+    league: str = ''
+    event_closed: bool = False
 
     @property
     def link(self) -> str:
@@ -320,6 +357,9 @@ class Database:
             WHERE avg_odds=0""")
         self._add_column("trade_market_info", "outcomes_json", "TEXT NOT NULL DEFAULT '[]'")
         self._add_column("trade_market_info", "event_id", "TEXT NOT NULL DEFAULT ''")
+        self._add_column("trade_market_info", "match_start", "INTEGER NOT NULL DEFAULT 0")
+        self._add_column("trade_market_info", "league", "TEXT NOT NULL DEFAULT ''")
+        self._add_column("trade_market_info", "event_closed", "INTEGER NOT NULL DEFAULT 0")
         self.conn.commit()
 
     def _add_column(self, table: str, column: str, spec: str) -> None:
@@ -351,10 +391,12 @@ class Database:
         with self.conn:
             self.conn.execute(
                 """INSERT OR REPLACE INTO trade_market_info
-                   (condition_id,title,market_title,slug,tier,outcomes_json,event_id)
-                   VALUES (?,?,?,?,?,?,?)""",
+                   (condition_id,title,market_title,slug,tier,outcomes_json,event_id,
+                    match_start,league,event_closed)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (market.condition_id, market.title, market.market_title, market.event_slug,
-                 market.tier, json.dumps(market.outcomes, ensure_ascii=False), market.event_id)
+                 market.tier, json.dumps(market.outcomes, ensure_ascii=False), market.event_id,
+                 market.match_start, market.league, int(market.event_closed))
             )
 
     def daily_top_positions(self, since: int, until: int, limit: int, min_odds: float = 1.2) -> list[tuple]:
@@ -669,6 +711,9 @@ class Radar:
             if not slug:
                 continue
             added = 0
+            # `startDate` to zwykle utworzenie rynku. Nie stosujemy go jako godziny meczu.
+            event_match_start = sports_start_timestamp(ev.get('startTime'))
+            league = series_name(ev.get('series')) or series_name(ev.get('seriesItem'))
             for m in ev.get("markets") or []:
                 if not isinstance(m, dict) or m.get("closed") is True:
                     continue
@@ -694,7 +739,9 @@ class Radar:
                     market_title=str(m.get("question") or title), event_slug=slug,
                     market_volume=number(market_volume) if market_volume is not None else None,
                     liquidity=number(liquidity) if liquidity is not None else None,
-                    tier=tier, outcomes=[str(o) for o in raw_outcomes]
+                    tier=tier, outcomes=[str(o) for o in raw_outcomes],
+                    match_start=sports_start_timestamp(m.get('gameStartTime')) or event_match_start,
+                    league=league, event_closed=bool(ev.get('closed', False))
                 )
                 added += 1
             if added:
