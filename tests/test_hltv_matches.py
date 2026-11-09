@@ -47,6 +47,30 @@ class HltvMatchesTests(unittest.TestCase):
         self.assertEqual(rows[1]["status"], "upcoming")
         self.assertEqual(rows[2]["status"], "upcoming")
 
+    def test_bestia_underw0rld_polymarket_matches_live_underworld_hltv(self):
+        now = 1800000000
+        html = ('<div class="match-wrapper" live="true">'
+                '<a href="/matches/2400097/bestia-academy-vs-underworld-cct-2026-south-america-series-8">'
+                '<div class="match-team"><span class="match-teamname">BESTIA Academy</span></div>'
+                '<div class="match-team-livescore">5 - 3</div>'
+                '<div class="match-team"><span class="match-teamname">underworld</span></div>'
+                '</a></div>')
+        fixtures = parse_matches(html)
+        self.assertEqual(len(fixtures), 1)
+        self.assertEqual(fixtures[0]["status"], "live")
+        self.assertEqual(fixtures[0]["teams"], ["bestia academy", "underworld"])
+        events = [{"key": "cs2-bestia-underw0rld",
+                   "title": "Counter-Strike: BESTIA Academy vs underw0rld (BO3) - CCT South America",
+                   "start": now - 600}]
+        matched = match_schedule(events, fixtures, now)
+        self.assertIn("cs2-bestia-underw0rld", matched)
+        self.assertEqual(matched["cs2-bestia-underw0rld"]["status"], "live")
+        self.assertIn("/2400097/", matched["cs2-bestia-underw0rld"]["url"])
+        # Different academy teams must not match an alias accidentally.
+        other = [{"key": "different", "title": "BESTIA Academy vs underworld Academy (BO3)",
+                  "start": now - 600}]
+        self.assertEqual(match_schedule(other, fixtures, now), {})
+
     def test_same_teams_not_wrong_event(self):
         fixtures = parse_matches(MATCHES_HTML)
         events = [
