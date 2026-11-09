@@ -67,7 +67,12 @@ class RadarTests(unittest.TestCase):
         self.addCleanup(self.db.conn.close)
         self.cfg = DEFAULT.copy()
         self.cfg["wallet_history_check"] = False
-        self.cfg["multi_wallet_cluster_usd"] = 1200
+        self.cfg["multi_wallet_cluster_usd"] = 900
+        # Testy natychmiastowych alertów: w produkcji progi pozostają bez zmian.
+        # W teście ustawiamy kwoty tak, aby odróżnić PILNE od zbiorczych.
+        self.cfg["priority_threshold_multiplier"] = 1.0
+        self.cfg["priority_min_usd"] = 1000
+        self.cfg["priority_cluster_usd"] = 1200
         self.cfg["wallet_cluster_usd"] = 1000
         self.api = FakeAPI()
         self.bot = Radar(self.api, self.db, self.cfg, "TOKEN", "123", False)
@@ -188,7 +193,7 @@ class RadarTests(unittest.TestCase):
         self.bot.process(trade(wallet, 600, now + 1, "0x2"), now-30)
         self.bot.flush_outbox()
         self.assertEqual(len(self.api.messages), 1)
-        self.assertIn("SERIA ZAKUPÓW", self.api.messages[0])
+        self.assertIn("PORTFEL ZBUDOWAŁ DUŻY WOLUMEN ZAKUPÓW", self.api.messages[0])
 
     def test_outbox_retries_failed_message(self):
         now = int(time.time())
