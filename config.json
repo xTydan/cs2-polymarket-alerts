@@ -55,15 +55,15 @@
       "min_usd": 1500
     },
     {
-      "min_odds": 2.0,
+      "min_odds": 2,
       "min_usd": 1000
     },
     {
-      "min_odds": 3.0,
+      "min_odds": 3,
       "min_usd": 750
     },
     {
-      "min_odds": 5.0,
+      "min_odds": 5,
       "min_usd": 500
     }
   ],
@@ -72,5 +72,14 @@
   "position_24h_threshold_multiplier": 0.9,
   "priority_threshold_multiplier": 1.5,
   "priority_min_usd": 1800,
-  "minimum_event_volume_usd": 100
+  "minimum_event_volume_usd": 100,
+  "flow_enabled": true,
+  "flow_window_seconds": 900,
+  "flow_min_buy_usd": 2500,
+  "flow_min_wallets": 3,
+  "flow_min_share": 0.8,
+  "flow_burst_multiplier": 4,
+  "flow_baseline_min_usd": 500,
+  "flow_priority_cooldown_seconds": 3600,
+  "flow_normal_cooldown_seconds": 3600
 }
