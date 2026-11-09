@@ -34,6 +34,23 @@ class HLTVResultsTests(unittest.TestCase):
         self.assertEqual(records[0]["score"], [2, 1])
         self.assertEqual(records[0]["teams"], ["team a", "team b"])
 
+    def test_html_void_tags_do_not_swallow_result_cards(self):
+        # HTMLParser reports <img> and <br> as start tags with no closing tag.
+        # Without treating these as void, the previous parser returned 0 results.
+        html = ('<div class="result-con" data-zonedgrouping-entry-unix="1794222000000">'
+                '<a href="/matches/321/alpha-vs-beta"><table><tr>'
+                '<td class="team-cell"><div class="team">'
+                '<img src="/alpha.svg">Alpha<br></div></td>'
+                '<td class="result-score"><span>2</span><span>0</span></td>'
+                '<td class="team-cell"><div class="team">'
+                '<img src="/beta.svg">Beta</div></td>'
+                '</tr></table></a></div>')
+        matches = parse_results(html)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["teams"], ["alpha", "beta"])
+        self.assertEqual(matches[0]["score"], [2, 0])
+        self.assertTrue(matches[0]["url"].endswith("/matches/321/alpha-vs-beta"))
+
     def test_match_result_reverse_teams(self):
         results = [{"teams": ["team b", "team a"], "score": [2, 1],
                     "timestamp": 1800000000, "url": "https://www.hltv.org/matches/1/test"}]
