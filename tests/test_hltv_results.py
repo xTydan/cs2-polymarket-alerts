@@ -70,6 +70,31 @@ class HLTVResultsTests(unittest.TestCase):
         actual = match_results(events, results, now=1800010000)
         self.assertEqual(actual["event-a"]["score"], [1, 2])
 
+    def test_delayed_final_result_uses_same_hltv_match_id(self):
+        scheduled = 1800000000
+        now = scheduled + 48 * 3600
+        event = [{"key": "delayed", "title": "Team A vs Team B (BO3)",
+                  "start": scheduled}]
+        result = {"teams": ["team b", "team a"], "score": [2, 1],
+                  "timestamp": scheduled + 40 * 3600,
+                  "url": "https://www.hltv.org/matches/12345/delayed-finals"}
+        # Without a prior link, old +/-18-hour safety margin remains in place.
+        self.assertEqual(match_results(event, [result], now=now), {})
+        linked = {"delayed": {"url": result["url"], "status": "uncertain"}}
+        finished = match_results(event, [result], now=now, linked_matches=linked)
+        self.assertEqual(finished["delayed"]["score"], [1, 2])
+
+    def test_one_finished_hltv_id_cannot_close_two_poly_events(self):
+        when = 1800000000
+        events = [
+            {"key": "a", "title": "Team A vs Team B", "start": when},
+            {"key": "b", "title": "Team A vs Team B", "start": when},
+        ]
+        result = {"teams": ["team a", "team b"], "score": [2, 0],
+                  "timestamp": when + 3600,
+                  "url": "https://www.hltv.org/matches/12345/same"}
+        self.assertEqual(match_results(events, [result], now=when + 4000), {})
+
     def test_ambiguous_match_is_not_assumed(self):
         row = {"teams": ["team a", "team b"], "score": [2, 0],
                "timestamp": 1800000000, "url": "https://www.hltv.org/matches/1/test"}
