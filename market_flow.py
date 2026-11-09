@@ -19,6 +19,7 @@ def assess_market_flow(
     min_share: float = 0.80,
     burst_multiplier: float = 4.0,
     baseline_min_usd: float = 500.0,
+    window_seconds: int = WINDOW_SECONDS,
 ) -> list[dict]:
     """Return meaningful per-outcome BUY flows, ranked by attention score.
 
@@ -39,7 +40,7 @@ def assess_market_flow(
         if not now - BASELINE_SECONDS <= int(t) <= now + 5:
             continue
         value = (names[str(outcome).casefold().strip()], str(wallet or ""), float(usd), float(price))
-        if int(t) >= now - WINDOW_SECONDS:
+        if int(t) >= now - window_seconds:
             recent.append(value)
         else:
             prior.append(value)
@@ -50,9 +51,9 @@ def assess_market_flow(
         return []
 
     previous_total = sum(r[2] for r in prior)
-    baseline_minutes = (BASELINE_SECONDS - WINDOW_SECONDS) / 60.0
+    baseline_minutes = (BASELINE_SECONDS - window_seconds) / 60.0
     comparison_available = previous_total >= baseline_min_usd
-    multiplier = (total / (previous_total * (WINDOW_SECONDS / (BASELINE_SECONDS - WINDOW_SECONDS)))
+    multiplier = (total / (previous_total * (window_seconds / (BASELINE_SECONDS - window_seconds)))
                   if comparison_available else None)
     by_side = defaultdict(list)
     by_prior_side = defaultdict(float)
@@ -101,7 +102,7 @@ def assess_market_flow(
             "prior_amount": previous_total, "prior_share": earlier_share,
             "delta_pp": delta_pp, "burst_ratio": multiplier,
             "burst": burst, "imbalanced": imbalanced, "urgent": urgent,
-            "score": score, "window_minutes": WINDOW_SECONDS // 60,
+            "score": score, "window_minutes": window_seconds // 60,
             "baseline_minutes": int(baseline_minutes),
         })
     return sorted(signals, key=lambda x: (-x["score"], -x["amount"]))
