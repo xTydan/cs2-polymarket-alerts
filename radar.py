@@ -22,6 +22,8 @@ from typing import Any
 
 import requests
 
+from market_flow import assess_market_flow, BASELINE_SECONDS
+
 BASE = Path(__file__).resolve().parent
 GAMMA = "https://gamma-api.polymarket.com"
 DATA = "https://data-api.polymarket.com"
@@ -106,6 +108,15 @@ DEFAULT = {
     "position_24h_threshold_multiplier": 0.90,
     "priority_threshold_multiplier": 1.50,
     "priority_min_usd": 1800,
+    "flow_enabled": True,
+    "flow_window_seconds": 900,
+    "flow_min_buy_usd": 2500,
+    "flow_min_wallets": 3,
+    "flow_min_share": 0.80,
+    "flow_burst_multiplier": 4.0,
+    "flow_baseline_min_usd": 500,
+    "flow_priority_cooldown_seconds": 3600,
+    "flow_normal_cooldown_seconds": 3600,
 }
 
 
@@ -193,6 +204,16 @@ def load_config(path: Path) -> dict:
         raise ValueError("alert_odds_bands musi byc posortowane po min_odds")
     if float(bands[0]['min_odds']) > float(config['alert_min_odds']):
         raise ValueError("alert_odds_bands musi zawierac prog nie wyzszy niz alert_min_odds")
+    if not 300 <= int(config["flow_window_seconds"]) <= 3600:
+        raise ValueError("flow_window_seconds musi być 300..3600")
+    if not 0.50 < number(config["flow_min_share"]) <= 1:
+        raise ValueError("flow_min_share musi być w zakresie (0.5,1]")
+    if int(config["flow_min_wallets"]) < 2:
+        raise ValueError("flow_min_wallets musi być co najmniej 2")
+    for key in ("flow_min_buy_usd", "flow_burst_multiplier", "flow_baseline_min_usd",
+                "flow_priority_cooldown_seconds", "flow_normal_cooldown_seconds"):
+        if number(config[key]) <= 0:
+            raise ValueError(f"{key} musi być dodatnie")
     for key in ('unknown_tier_threshold_multiplier', 'position_6h_threshold_multiplier',
                 'position_24h_threshold_multiplier','priority_threshold_multiplier','priority_min_usd'):
         if number(config[key]) <= 0:
@@ -496,6 +517,59 @@ class Database:
         count, usd, wallets, shares = self.conn.execute(query, args).fetchone()
         return int(count), float(usd), int(wallets), float(shares) / float(usd) if usd else 0.0
 
+    def market_flow_trades(self, condition_id: str, since: int, until: int) -> list[tuple]:
+        """Unique recorded BUY fills in one exact market; PK dedup."""
+        return self.conn.execute(
+            """SELECT timestamp, outcome, wallet, usd, price FROM trades
+               WHERE condition_id=? AND timestamp>=? AND timestamp<=?
+               ORDER BY timestamp, id""", (condition_id, since, until)
+        ).fetchall()
+
+    def observed_buy_summary(self, condition_id: str, outcome: str, since: int, until: int) -> tuple:
+        """Real recorded buys, not accumulated signal_candidate.usd values."""
+        n, amount, wallets, shares = self.conn.execute(
+            """SELECT COUNT(*), COALESCE(SUM(usd),0),
+                      COUNT(DISTINCT NULLIF(wallet,'')), COALESCE(SUM(usd/price),0)
+               FROM trades WHERE condition_id=? AND outcome=?
+               AND timestamp>=? AND timestamp<?""",
+            (condition_id, outcome, since, until)
+        ).fetchone()
+        return int(n), float(amount), int(wallets), float(shares) / float(amount) if amount else 0.0
+
+    def recently_alerted_market(self, condition_id: str, outcome: str, now: int,
+                                seconds: int = 15 * 60) -> bool:
+        """Suppress duplicate flow urgency after a priority trade/cluster alert."""
+        prefix = f"priority:{condition_id}:"
+        multi = f"priority-multi:{condition_id}:{outcome}"
+        suffix = f":{outcome}"
+        rows = list(self.conn.execute(
+            "SELECT key FROM cooldowns WHERE sent_at>=?", (now - seconds,)
+        )) + list(self.conn.execute("SELECT key FROM outbox WHERE key LIKE 'priority:%'"))
+        return any(key == multi or (key.startswith(prefix) and key.endswith(suffix))
+                   for (key,) in rows)
+
+    def queue_market_flow_signal(self, condition_id: str, outcome: str,
+                                 now: int, cooldown: int, avg_odds: float) -> bool:
+        """Only a marker for digest; monetary totals come from raw trades."""
+        key = f"normal-flow:{condition_id}:{outcome}"
+        synthetic_id = "flow:" + hashlib.sha256(
+            f"{condition_id}|{outcome}|{now // 900}".encode("utf-8")
+        ).hexdigest()
+        with self.conn:
+            last = self.conn.execute(
+                "SELECT last_at FROM signal_throttle WHERE key=?", (key,)
+            ).fetchone()
+            if last and now - int(last[0]) < cooldown:
+                return False
+            self.conn.execute("INSERT OR REPLACE INTO signal_throttle VALUES (?,?)", (key, now))
+            self.conn.execute(
+                """INSERT OR IGNORE INTO signal_candidates
+                   (id,created_at,condition_id,outcome,wallet,kind,usd,batch_key,avg_odds)
+                   VALUES (?,?,?,?,'','flow',0,'',?)""",
+                (synthetic_id, now, condition_id, outcome, avg_odds)
+            )
+        return True
+
     def can_alert(self, key: str, now: int, cooldown: int) -> bool:
         pending = self.conn.execute("SELECT 1 FROM outbox WHERE key=?", (key,)).fetchone()
         if pending:
@@ -546,7 +620,7 @@ class Database:
                 VALUES (?,?,?,?,?,?,?,'',?)""",
                 (trade['id'], now, trade['condition_id'], trade['outcome'],
                  trade.get('wallet') or '', kind,
-                 float(total_usd if total_usd is not None else trade['usd']),
+                 float(trade['usd'])  # store the actual BUY, never a cumulative position,
                  float(avg_odds if avg_odds is not None else 1 / trade['price'])))
             return True
 
@@ -558,7 +632,8 @@ class Database:
 
     def pending_normal_signals(self) -> list[tuple]:
         return self.conn.execute("""SELECT s.condition_id, s.outcome, s.kind, s.usd,
-            COALESCE(i.title,'Nieznany mecz'), COALESCE(i.slug,''), s.wallet, s.avg_odds
+            COALESCE(i.title,'Nieznany mecz'), COALESCE(i.slug,''), s.wallet, s.avg_odds,
+            COALESCE(i.market_title,''), s.created_at
             FROM signal_candidates s
             LEFT JOIN trade_market_info i ON i.condition_id=s.condition_id
             WHERE s.batch_key='' ORDER BY s.created_at, s.id""").fetchall()
@@ -595,6 +670,7 @@ class Radar:
         self.alerts_queued = 0
         self.normal_signals_queued = 0
         self.daily_reports_queued = 0
+        self.flow_conditions: set[str] = set()
         self.last_discovery = 0.0
         self.csv_path = BASE / "alerty.csv"
         self.cache_path = BASE / "market_cache.json"
@@ -1067,6 +1143,7 @@ class Radar:
         if not self.db.add_trade(trade):
             return False
         self.db.remember_market(m)
+        self.flow_conditions.add(trade["condition_id"])
         now = int(time.time())
         odds = 1.0 / trade['price']
         minimum_odds = number(self.cfg['alert_min_odds'])
@@ -1195,6 +1272,7 @@ class Radar:
                 coverage_complete = False
         if coverage_complete:
             self.db.set_meta("last_successful_poll", str(now))
+        self.market_flow_alerts(now)
         self.normal_digest(now)
         self.daily_summary(now)
         self.db.cleanup(now)
