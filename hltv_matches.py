@@ -179,6 +179,8 @@ def event_name_similarity(a: str, b: str) -> float:
 
 def candidate_score(event: dict, fixture: dict, now: int,
                     previous_url: str = "") -> tuple[float, str] | None:
+    if event.get("closed"):
+        return None
     pair = teams_from_title(event.get("title", ""))
     if not pair:
         return None
